@@ -104,7 +104,7 @@ it('offers request limits for workspace administrators', async () => {
   expect(screen.getByRole('menuitem', { name: 'Request limits' })).toBeTruthy()
 })
 
-it.each([0, 10])(
+it.each([0, 10, 64, 1000])(
   'updates shared member concurrency to %i and resets a member password',
   async (maxConcurrency) => {
     const policy = {
@@ -144,13 +144,13 @@ it.each([0, 10])(
     await user.type(rate, '60')
     const concurrency = within(limits).getByLabelText('Concurrent requests')
     expect((concurrency as HTMLInputElement).value).toBe('10')
-    expect(concurrency.getAttribute('max')).toBe('10')
+    expect(concurrency.getAttribute('max')).toBe('1000')
     await user.clear(concurrency)
-    await user.type(concurrency, '11')
+    await user.type(concurrency, '1001')
     await user.click(
       within(limits).getByRole('button', { name: 'Save changes' }),
     )
-    expect(within(limits).getByRole('alert').textContent).toContain('0–10')
+    expect(within(limits).getByRole('alert').textContent).toContain('0–1,000')
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(
       false,
     )

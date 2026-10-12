@@ -183,7 +183,7 @@ func (h *keyHTTP) websocket(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			turnCtx, turnCancel := context.WithTimeout(ctx, 10*time.Minute)
+			turnCtx, turnCancel := context.WithTimeout(ctx, h.gateway.Policy().RequestTimeout)
 			turnCtx = gateway.WithRequestIdentity(turnCtx, principal.KeyID, "websocket")
 			turnID = gateway.RequestID(turnCtx)
 			err = h.websocketTurn(turnCtx, principal.UserID, principal.GroupID, normalized, headers, &conversation, write)
@@ -207,7 +207,7 @@ func (h *keyHTTP) websocketTurn(ctx context.Context, userID, groupID int64, requ
 	if result.StatusCode < 200 || result.StatusCode >= 300 {
 		return &upstream.UpstreamError{Status: result.StatusCode, RetryAfter: result.Header.Get("Retry-After")}
 	}
-	return result.Events(func(event []byte) error {
+	return consumeEvents(ctx, result, h.gateway.Policy().StreamIdleTimeout, 0, func(event []byte) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -237,7 +237,7 @@ func (h *keyHTTP) websocketTurn(ctx context.Context, userID, groupID int64, requ
 			}
 		}
 		return nil
-	})
+	}, nil)
 }
 
 func prewarmEvents(request []byte) ([]byte, []byte) {

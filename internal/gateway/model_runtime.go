@@ -18,6 +18,9 @@ type modelRuntime struct {
 	cooldownUntil, failures, inFlight   int64
 	lastFailureSequence                 int64
 	persistFailed                       bool
+	reason                              string
+	lastFailureAt                       int64
+	failureWindowAt                     int64
 }
 
 // Caller holds the admission lock. Idle persisted state is read on demand; only
@@ -35,7 +38,7 @@ func (s *Service) readModelRuntime(ctx context.Context, q *db.Queries, id, model
 	if state := s.modelHealth[key]; state != nil && state.lifecycle == row.Lifecycle && state.runtimeRevision == row.RuntimeRevision {
 		return state, nil
 	}
-	return &modelRuntime{key: key, lifecycle: row.Lifecycle, runtimeRevision: row.RuntimeRevision, version: row.Version, cooldownUntil: row.CooldownUntil, failures: row.Failures}, nil
+	return &modelRuntime{key: key, lifecycle: row.Lifecycle, runtimeRevision: row.RuntimeRevision, version: row.Version, cooldownUntil: row.CooldownUntil, failures: row.Failures, reason: row.Reason, lastFailureAt: row.LastFailureAt, failureWindowAt: row.FailureWindowAt}, nil
 }
 
 func (s *Service) modelAdmission(ctx context.Context, q *db.Queries, id, model string) error {
@@ -53,7 +56,7 @@ func modelRuntimeAdmission(state *modelRuntime, now int64, model string) error {
 	if state.cooldownUntil > now {
 		return &CoolingError{RetryAfter: state.cooldownUntil - now, Model: model}
 	}
-	if state.failures > 0 && state.inFlight > 0 {
+	if state.cooldownUntil > 0 && state.failures > 0 && state.inFlight > 0 {
 		return ErrAccountBusy
 	}
 	return nil
@@ -80,13 +83,30 @@ func (s *Service) finishModelRuntime(ctx context.Context, e *observation, outcom
 		return false
 	}
 	failed := false
-	if e.modelLimited {
+	if e.modelLimited || e.modelTransient {
 		next := *state
+		reason := "rate_limited"
+		if e.modelTransient {
+			reason = "upstream_error"
+		}
+		now := s.now()
+		// Count from the first failure, rather than extending a sliding streak
+		// indefinitely when failures keep arriving just inside the window.
+		if reason != next.reason || reason == "upstream_error" && (now.UnixMilli() < next.lastFailureAt || now.UnixMilli()-next.failureWindowAt >= s.policy.TransientWindow.Milliseconds()) {
+			next.failures = 0
+			next.failureWindowAt = now.UnixMilli()
+		}
+		next.reason, next.lastFailureAt = reason, now.UnixMilli()
 		next.failures = min(16, next.failures+1)
-		next.cooldownUntil = max(next.cooldownUntil, s.now().Unix()+retryDelay(retry, s.now()))
+		if e.modelLimited {
+			next.cooldownUntil = max(next.cooldownUntil, now.Unix()+retryDelay(retry, now, s.policy.RateLimitCooldown))
+		} else if next.failures >= s.policy.TransientThreshold {
+			delay := min(300, int64(s.policy.TransientCooldown.Seconds())<<min(4, next.failures-s.policy.TransientThreshold))
+			next.cooldownUntil = max(next.cooldownUntil, now.Unix()+max(1, delay))
+		}
 		s.sequence++
 		next.lastFailureSequence = s.sequence
-		version, err := s.queries.SaveAccountModelRuntime(ctx, db.SaveAccountModelRuntimeParams{TargetID: state.key.account, WorkspaceID: s.tenantID, Model: state.key.model, Lifecycle: state.lifecycle, RuntimeRevision: state.runtimeRevision, CooldownUntil: next.cooldownUntil, Failures: next.failures})
+		version, err := s.queries.SaveAccountModelRuntime(ctx, db.SaveAccountModelRuntimeParams{TargetID: state.key.account, WorkspaceID: s.tenantID, Model: state.key.model, Lifecycle: state.lifecycle, RuntimeRevision: state.runtimeRevision, CooldownUntil: next.cooldownUntil, Failures: next.failures, Reason: next.reason, LastFailureAt: next.lastFailureAt, FailureWindowAt: next.failureWindowAt})
 		if err == nil {
 			next.version = version
 			next.persistFailed = false

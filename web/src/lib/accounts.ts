@@ -34,7 +34,7 @@ export const accountSchema = z.object({
   proxy_id: z.string().default(''),
   provider: z.enum(subscriptionProviders).default('codex'),
   // Saved limits survive upgrades; keep this range aligned with runtime responses.
-  max_concurrency: z.number().int().min(1).max(30).default(30),
+  max_concurrency: z.number().int().min(1).max(1000).default(30),
   name: z.string(),
   group_count: z.number().int().nonnegative().optional(),
   email: z.string(),

@@ -11,8 +11,6 @@ import (
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
-const maxAccountWaiting = 8
-
 type accountWaitError string
 
 func (e accountWaitError) Error() string { return string(e) }
@@ -73,7 +71,7 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 			break
 		}
 		if timer == nil {
-			if s.waiting[entry.record.GroupID] >= maxAccountWaiting {
+			if s.waiting[entry.record.GroupID] >= s.policy.QueueLimit {
 				return id, digest, ErrAccountQueueFull
 			}
 			s.waiting[entry.record.GroupID]++
@@ -135,7 +133,11 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 }
 
 func (s *Service) recheckWaitingMember(ctx context.Context, entry *observation) error {
-	policy, err := s.queries.GetMemberLimits(ctx, db.GetMemberLimitsParams{TenantID: s.tenantID, UserID: entry.record.UserID})
+	return s.recheckMember(ctx, s.queries, entry)
+}
+
+func (s *Service) recheckMember(ctx context.Context, q *db.Queries, entry *observation) error {
+	policy, err := q.GetMemberLimits(ctx, db.GetMemberLimitsParams{TenantID: s.tenantID, UserID: entry.record.UserID})
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !policy.Enabled {
 		return groups.ErrUnavailable
 	}
@@ -147,7 +149,7 @@ func (s *Service) recheckWaitingMember(ctx context.Context, entry *observation) 
 		return ErrMemberBusy
 	}
 	if entry.record.KeyID != 0 {
-		key, err := s.queries.GetKey(ctx, db.GetKeyParams{ID: entry.record.KeyID, UserID: entry.record.UserID, TenantID: s.tenantID})
+		key, err := q.GetKey(ctx, db.GetKeyParams{ID: entry.record.KeyID, UserID: entry.record.UserID, TenantID: s.tenantID})
 		if errors.Is(err, sql.ErrNoRows) {
 			return groups.ErrUnavailable
 		}

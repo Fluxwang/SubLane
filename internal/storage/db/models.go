@@ -17,11 +17,11 @@ type Account struct {
 	ExpiresAt      int64
 	CreatedAt      int64
 	UpdatedAt      int64
-	MaxConcurrency int64
 	ModelsSnapshot []byte
 	ModelsRevision int64
 	TenantID       int64
 	ProxyID        *string
+	MaxConcurrency int64
 }
 
 type AccountGroup struct {

@@ -709,8 +709,8 @@ export const zh: Record<keyof typeof en, string> = {
   memberLimitsDescription:
     '该成员的所有 API 密钥和资源组共用这些限制，修改对新的模型请求生效。',
   memberLimitsHint:
-    '0 表示不限。每分钟请求数为 0–6,000，并发为 0–10（默认 10）；已开始的调用会继续执行。',
-  memberLimitsInvalid: '请输入整数：每分钟请求数为 0–6,000，并发为 0–10。',
+    '0 表示不限。每分钟请求数为 0–6,000，并发为 0–1,000（默认 10）；已开始的调用会继续执行。',
+  memberLimitsInvalid: '请输入整数：每分钟请求数为 0–6,000，并发为 0–1,000。',
   memberLimitsFailed: '无法读取或保存请求限制，请重试。',
   loadingMemberLimits: '正在读取请求限制…',
   requestsPerMinute: '每分钟请求数',
@@ -1222,8 +1222,9 @@ export const zh: Record<keyof typeof en, string> = {
   accountScheduling: '调度设置',
   accountConcurrencyLimit: '模型请求并发上限',
   accountConcurrencyHint:
-    '允许此账号在所有资源组合计处理 1～30 个模型请求。新账号默认 30，已有账号的设置保持不变。满载时新请求最多等待 10 秒，每个资源组最多等待 8 个请求。降低上限不会中断正在执行的请求。',
-  accountConcurrencyInvalid: '请输入 1～30 之间的整数。',
+    '允许此账号在所有资源组合计处理 1～1,000 个模型请求，新账号默认 30。工作区总容量和排队配置仍然生效。降低上限不会中断正在执行的请求。',
+  accountConcurrencyInvalid: '请输入 1～1,000 之间的整数。',
+  reasonModelCooling: '模型正在冷却',
   lastAccountFailure: '最近调度失败',
   resumeAccountHint:
     '清除冷却后可再次参与调度；不会启用已停用账号，也不会更新授权。',

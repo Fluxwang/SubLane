@@ -96,6 +96,7 @@ type observation struct {
 	quota              *upstream.Usage
 	modelState         *modelRuntime
 	modelLimited       bool
+	modelTransient     bool
 }
 
 func (s *Service) begin(ctx context.Context, userID, groupID int64, kind Kind) (*observation, error) {
@@ -178,6 +179,9 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 			}
 		}
 		s.mu.Lock()
+		// A request deadline or unknown route failure is not evidence that every
+		// model on this account is unavailable. Explicit responses have model scope.
+		e.modelTransient = s.policy.TransientThreshold > 0 && penalty == "upstream_error" && (code == "stream_interrupted" || e.record.UpstreamStatus != nil && *e.record.UpstreamStatus >= 500)
 		if e.memberLeased {
 			if s.memberActive[e.record.UserID] <= 1 {
 				delete(s.memberActive, e.record.UserID)
@@ -189,19 +193,14 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 			if state := s.health[e.record.AccountID]; state != nil {
 				changed := false
 				if state.revision == e.revision {
-					if penalty != "" {
+					if penalty == "rate_limited" {
 						state.Failures = min(16, state.Failures+1)
 						state.lastFailureAt = s.now().UnixMilli()
 						s.sequence++
 						state.lastFailureSequence = s.sequence
 						state.Reason = penalty
 						changed = true
-						delay := int64(0)
-						if penalty == "rate_limited" {
-							delay = retryDelay(retry, s.now())
-						} else if state.Failures >= 3 {
-							delay = min(300, int64(30)<<min(4, state.Failures-3))
-						}
+						delay := retryDelay(retry, s.now(), s.policy.RateLimitCooldown)
 						if delay > 0 {
 							state.CooldownUntil = max(state.CooldownUntil, s.now().Unix()+delay)
 						}

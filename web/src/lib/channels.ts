@@ -11,7 +11,7 @@ export const channelSchema = z.object({
   enabled: z.boolean(),
   status: z.enum(['ready', 'unverified', 'key_required']),
   proxy_id: z.string().default(''),
-  max_concurrency: z.number().int().min(1).max(30),
+  max_concurrency: z.number().int().min(1).max(1000),
   group_count: z.number().int().nonnegative().optional(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),

@@ -54,7 +54,7 @@ func (s *Service) MemberLimits(ctx context.Context, userID int64) (MemberLimit, 
 }
 
 func (s *Service) SetMemberLimits(ctx context.Context, userID, rpm, concurrency int64) error {
-	if userID <= 0 || rpm < 0 || rpm > 6000 || concurrency < 0 || concurrency > 10 {
+	if userID <= 0 || rpm < 0 || rpm > 6000 || concurrency < 0 || concurrency > 1000 {
 		return accounts.ErrInput
 	}
 	s.mu.Lock()

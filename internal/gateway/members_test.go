@@ -84,12 +84,12 @@ func TestMemberLimitsShareKeysGroupsAndSurviveRestart(t *testing.T) {
 	if err := s.SetMemberLimits(ctx, 1, 1, 1); err != nil {
 		t.Fatal("owner policy could not be changed", err)
 	}
-	for _, v := range [][2]int64{{-1, 1}, {6001, 1}, {1, -1}, {1, 11}} {
+	for _, v := range [][2]int64{{-1, 1}, {6001, 1}, {1, -1}, {1, 1001}} {
 		if err := s.SetMemberLimits(ctx, member, v[0], v[1]); err == nil {
 			t.Fatal("invalid limits accepted", v)
 		}
 	}
-	for _, concurrency := range []int64{0, 10} {
+	for _, concurrency := range []int64{0, 10, 64, 1000} {
 		if err := s.SetMemberLimits(ctx, member, 0, concurrency); err != nil {
 			t.Fatalf("set concurrency %d: %v", concurrency, err)
 		}

@@ -140,7 +140,7 @@ func run() error {
 	}
 	codexVersions.Start()
 	grokVersions.Start()
-	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, GrokVersion: grokVersions.Current, MaxRequestBody: cfg.MaxRequestBody})
+	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, GrokVersion: grokVersions.Current, MaxRequestBody: cfg.MaxRequestBody, InferenceHeaderTimeout: &cfg.InferenceHeaderTimeout})
 	defer provider.Close()
 	if err := provider.Start(ctx); err != nil {
 		return err
@@ -159,7 +159,7 @@ func run() error {
 		alerts:  notifications,
 		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, grokVersions: grokVersions, timeZone: timeZone,
 		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL, trustedProxies: cfg.TrustedProxies,
-		version: version, started: time.Now()}
+		version: version, started: time.Now(), gatewayPolicy: cfg.Gateway}
 	defer registry.Close()
 	registry.Start()
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)

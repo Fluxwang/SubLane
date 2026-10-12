@@ -10,26 +10,33 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/murongg/SubLane/internal/gateway"
 )
 
 type Config struct {
-	Demo            bool
-	Addr            string
-	DataDir         string
-	LogLevel        slog.Level
-	MaxRequestBody  int64
-	PublicURL       string
-	TrustedProxies  []netip.Prefix
-	PricingURL      string
-	PricingHashURL  string
-	PricingCache    string
-	PricingFallback string
-	PricingOverride string
-	PricingInterval time.Duration
+	Demo                   bool
+	Addr                   string
+	DataDir                string
+	LogLevel               slog.Level
+	MaxRequestBody         int64
+	PublicURL              string
+	TrustedProxies         []netip.Prefix
+	PricingURL             string
+	PricingHashURL         string
+	PricingCache           string
+	PricingFallback        string
+	PricingOverride        string
+	PricingInterval        time.Duration
+	Gateway                gateway.Policy
+	InferenceHeaderTimeout time.Duration
 }
 
 func Load(getenv func(string) string) (Config, error) {
-	c := Config{Addr: "127.0.0.1:8080", DataDir: "./data", LogLevel: slog.LevelInfo, MaxRequestBody: 128 << 20, PricingInterval: 6 * time.Hour}
+	c := Config{Addr: "127.0.0.1:8080", DataDir: "./data", LogLevel: slog.LevelInfo, MaxRequestBody: 128 << 20, PricingInterval: 6 * time.Hour, Gateway: gateway.DefaultPolicy(), InferenceHeaderTimeout: 5 * time.Minute}
+	if err := c.loadGateway(getenv); err != nil {
+		return c, err
+	}
 	if v := getenv("SUBLANE_DEMO"); v != "" {
 		if v != "true" && v != "false" {
 			return c, fmt.Errorf("SUBLANE_DEMO must be true or false")

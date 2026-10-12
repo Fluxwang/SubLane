@@ -48,12 +48,12 @@ func syntheticStream() *http.Response {
 func TestAccountConcurrencySupportsThirtyAndPreservesLimitAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	s, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
-	for _, limit := range []int64{1, 30} {
+	for _, limit := range []int64{1, 30, 64, 1000} {
 		if err := s.SetConcurrency(ctx, ids["codex"], limit); err != nil {
 			t.Fatal("valid account limit rejected", limit, err)
 		}
 	}
-	for _, limit := range []int64{0, 31} {
+	for _, limit := range []int64{0, 1001} {
 		if err := s.SetConcurrency(ctx, ids["codex"], limit); !errors.Is(err, accounts.ErrInput) {
 			t.Fatal("invalid account limit accepted", limit, err)
 		}
@@ -68,7 +68,7 @@ func TestAccountConcurrencySupportsThirtyAndPreservesLimitAcrossRestart(t *testi
 	for _, state := range states {
 		if state.ID == ids["codex"] {
 			found = true
-			if state.MaxConcurrency != 30 {
+			if state.MaxConcurrency != 1000 {
 				t.Fatal("restart lost account concurrency", state.MaxConcurrency)
 			}
 		}
@@ -199,7 +199,7 @@ func TestTransientFailuresCooldownAndResumeIgnoreOlderRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	older.Body.Close()
-	if _, err := service.Open(ctx, 1, 1, raw, nil, Responses); !errors.Is(err, ErrAccountCooling) {
+	if _, err := service.Open(ctx, 1, 1, raw, nil, Responses); !errors.Is(err, ErrModelCooling) {
 		t.Fatal("older success cleared newer failures", err)
 	}
 	if err := service.Resume(ctx, ids["codex"]); err != nil {
@@ -503,14 +503,11 @@ func TestLateSuccessCannotEraseFailureAtSameTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.Body.Close()
-	states, err := service.Runtime(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, state := range states {
-		if state.ID == ids["codex"] && state.Failures != 1 {
-			t.Fatal("late success erased new failure")
-		}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	state, err := service.readModelRuntime(context.Background(), service.queries, ids["codex"], "synthetic-model")
+	if err != nil || state.failures != 1 {
+		t.Fatal("late success erased new model failure", err)
 	}
 }
 

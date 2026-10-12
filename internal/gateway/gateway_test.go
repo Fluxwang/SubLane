@@ -118,7 +118,7 @@ func TestGatewayKeepsAccountAffinityAndBoundsActiveRequests(t *testing.T) {
 	}
 	stream.Body.Close()
 	releases := []func(){}
-	for range 30 {
+	for range cap(gateway.slots) {
 		release, err := gateway.Acquire()
 		if err != nil {
 			t.Fatal(err)

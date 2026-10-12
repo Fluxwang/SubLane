@@ -166,7 +166,7 @@ func TestRuntimeManagementRemainsAdministratorOnly(t *testing.T) {
 	if got := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://foreign.example.test", map[string]int{"max_concurrency": 1}, owner).Code; got != 403 {
 		t.Fatal("cross-origin policy update", got)
 	}
-	for _, limit := range []int64{1, 8, 30} {
+	for _, limit := range []int64{1, 8, 30, 64, 1000} {
 		result := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int64{"max_concurrency": limit}, owner)
 		var updated struct {
 			Max int64 `json:"max_concurrency"`
@@ -186,7 +186,7 @@ func TestRuntimeManagementRemainsAdministratorOnly(t *testing.T) {
 			}
 		}
 	}
-	for _, limit := range []int{0, 31} {
+	for _, limit := range []int{0, 1001} {
 		if got := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int{"max_concurrency": limit}, owner).Code; got != 400 {
 			t.Fatal("invalid concurrency accepted", limit, got)
 		}

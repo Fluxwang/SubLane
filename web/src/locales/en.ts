@@ -777,9 +777,9 @@ export const en = {
   memberLimitsDescription:
     'All API keys and groups used by this member share these limits. Changes apply to new model requests.',
   memberLimitsHint:
-    '0 means unlimited. Requests per minute: 0–6,000; concurrency: 0–10 (default: 10). Active calls are allowed to finish.',
+    '0 means unlimited. Requests per minute: 0–6,000; concurrency: 0–1,000 (default: 10). Active calls are allowed to finish.',
   memberLimitsInvalid:
-    'Enter whole numbers: 0–6,000 requests per minute and 0–10 concurrent requests.',
+    'Enter whole numbers: 0–6,000 requests per minute and 0–1,000 concurrent requests.',
   memberLimitsFailed:
     'Could not load or save request limits. Please try again.',
   loadingMemberLimits: 'Loading request limits…',
@@ -1350,8 +1350,9 @@ export const en = {
   accountScheduling: 'Scheduling settings',
   accountConcurrencyLimit: 'Concurrent model requests',
   accountConcurrencyHint:
-    'Allow 1–30 active model requests for this account across all groups. New accounts default to 30; existing account settings stay unchanged. When full, new requests wait up to 10 seconds, with at most 8 waiting per group. Lowering the limit lets existing requests finish.',
-  accountConcurrencyInvalid: 'Enter a whole number from 1 to 30.',
+    'Allow 1–1,000 active model requests for this account across all groups. New accounts default to 30. Workspace capacity and queue settings also apply. Lowering the limit lets existing requests finish.',
+  accountConcurrencyInvalid: 'Enter a whole number from 1 to 1,000.',
+  reasonModelCooling: 'Model cooling down',
   lastAccountFailure: 'Last scheduling failure',
   resumeAccountHint:
     'Clear the cooldown to allow requests again. This does not enable a disabled account or renew its authorization.',

@@ -143,7 +143,7 @@ func TestOpenUpdatesAccountConcurrencyDefaultAndPreservesSettings(t *testing.T) 
 		if err := upgraded.QueryRowContext(ctx, "SELECT max_concurrency FROM accounts WHERE id='synthetic-new'").Scan(&got); err != nil || got != 30 {
 			t.Fatal("new account default did not become 30", got, err)
 		}
-		for _, invalid := range []int{0, 31} {
+		for _, invalid := range []int{0, 1001} {
 			if _, err := upgraded.ExecContext(ctx, "UPDATE accounts SET max_concurrency=? WHERE id='synthetic-new'", invalid); err == nil {
 				t.Fatal("database accepted an invalid account limit", invalid)
 			}
@@ -228,8 +228,8 @@ func TestOpenUpdatesMemberConcurrencyDefaultAndPreservesLimits(t *testing.T) {
 				t.Fatalf("new member %d defaults: rpm=%d concurrency=%d err=%v", userID, rpm, concurrency, err)
 			}
 		}
-		if _, err := upgraded.ExecContext(ctx, "UPDATE memberships SET max_concurrency=11 WHERE tenant_id=2 AND user_id=4"); err == nil {
-			t.Fatal("database accepted concurrency above 10")
+		if _, err := upgraded.ExecContext(ctx, "UPDATE memberships SET max_concurrency=1001 WHERE tenant_id=2 AND user_id=4"); err == nil {
+			t.Fatal("database accepted concurrency above 1000")
 		}
 		if err := upgraded.Close(); err != nil {
 			t.Fatal(err)

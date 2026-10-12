@@ -5,7 +5,7 @@ import { request } from './request'
 
 export const runtimeSchema = z.object({
   id: z.string(),
-  max_concurrency: z.number().int().min(1).max(30),
+  max_concurrency: z.number().int().min(1).max(1000),
   in_flight: z.number().int().nonnegative(),
   cooldown_until: z.number().int().nonnegative(),
   reason: z.string(),
@@ -81,7 +81,7 @@ export const reasonKeys: Record<string, keyof typeof en> = {
   account_queue_full: 'reasonAccountQueueFull',
   account_wait_timeout: 'reasonAccountWaitTimeout',
   account_cooling: 'reasonCooling',
-  model_cooling: 'reasonModelRateLimited',
+  model_cooling: 'reasonModelCooling',
   model_rate_limited: 'reasonModelRateLimited',
   account_unavailable: 'reasonAccountUnavailable',
   group_unavailable: 'reasonGroupUnavailable',

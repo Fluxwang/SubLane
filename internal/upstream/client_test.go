@@ -39,6 +39,34 @@ func TestClientConfiguredRequestBodyLimit(t *testing.T) {
 	}
 }
 
+func TestInferenceHeaderTimeoutIsIndependentOfMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		if r.URL.Path == "/models" {
+			io.WriteString(w, `{"models":[{"slug":"synthetic-model","visibility":"list"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic\",\"output\":[]}}\n\n")
+	}))
+	defer server.Close()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 20 * time.Millisecond
+	headerTimeout := 250 * time.Millisecond
+	c := NewWithOptions(Options{Transport: transport, InferenceHeaderTimeout: &headerTimeout})
+	defer c.Close()
+	c.baseURL = server.URL
+	credential := accounts.Credential{AccountID: "synthetic-subject", AccessToken: "synthetic-access"}
+	if _, err := c.Models(context.Background(), credential); err == nil {
+		t.Fatal("metadata timeout was widened")
+	}
+	stream, err := c.Responses(context.Background(), credential, []byte(`{"model":"synthetic-model","input":"synthetic"}`), nil, false)
+	if err != nil {
+		t.Fatalf("inference inherited metadata timeout: %v", err)
+	}
+	stream.Body.Close()
+}
+
 func TestOAuthExchangeAndRefreshUsePinnedEndpoints(t *testing.T) {
 	idToken := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"email":"member@example.test","https://api.openai.com/auth":{"chatgpt_account_id":"upstream-test","chatgpt_plan_type":"plus"}}`)) + ".synthetic"
 	calls := 0

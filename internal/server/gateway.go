@@ -138,7 +138,8 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 	if kind.IsGemini() {
 		flags.Stream = kind == gateway.GeminiStream
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	policy := h.gateway.Policy()
+	ctx, cancel := context.WithTimeout(r.Context(), policy.RequestTimeout)
 	defer cancel()
 	principal, _ := r.Context().Value(keyPrincipalKey{}).(apikey.Principal)
 	ctx = gateway.WithRequestIdentity(ctx, principal.KeyID, "http")
@@ -177,8 +178,28 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 		return
 	}
 	started := false
+	startStream := func() {
+		if started {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(200)
+		started = true
+	}
+	var heartbeat func() error
+	if flags.Stream {
+		heartbeat = func() error {
+			startStream()
+			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+				return err
+			}
+			return controller.Flush()
+		}
+	}
 	var completed []byte
-	err = result.Events(func(event []byte) error {
+	err = consumeEvents(ctx, result, policy.StreamIdleTimeout, policy.KeepaliveInterval, func(event []byte) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -186,13 +207,7 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 			completed = bytes.Clone(event)
 			return nil
 		}
-		if !started {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("X-Accel-Buffering", "no")
-			w.WriteHeader(200)
-			started = true
-		}
+		startStream()
 		for _, chunk := range result.Translate(ctx, event) {
 			chunk = bytes.TrimSpace(chunk)
 			if len(chunk) == 0 {
@@ -206,7 +221,7 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 			}
 		}
 		return controller.Flush()
-	})
+	}, heartbeat)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return

@@ -75,7 +75,9 @@ func (q *Queries) DeleteObsoleteModelRuntime(ctx context.Context, arg DeleteObso
 
 const getAccountModelRuntime = `-- name: GetAccountModelRuntime :one
 SELECT a.models_revision AS lifecycle, COALESCE(ar.revision,0) AS runtime_revision,
-       COALESCE(m.cooldown_until,0) AS cooldown_until, COALESCE(m.failures,0) AS failures, COALESCE(m.version,0) AS version
+       COALESCE(m.cooldown_until,0) AS cooldown_until, COALESCE(m.failures,0) AS failures, COALESCE(m.version,0) AS version,
+       COALESCE(m.reason,'') AS reason, COALESCE(m.last_failure_at,0) AS last_failure_at,
+       COALESCE(m.failure_window_at,0) AS failure_window_at
 FROM accounts a LEFT JOIN account_runtime ar ON ar.account_id=a.id
 LEFT JOIN account_model_runtime m ON m.account_id=a.id AND m.model=?1
  AND m.lifecycle=a.models_revision AND m.runtime_revision=COALESCE(ar.revision,0)
@@ -94,6 +96,9 @@ type GetAccountModelRuntimeRow struct {
 	CooldownUntil   int64
 	Failures        int64
 	Version         int64
+	Reason          string
+	LastFailureAt   int64
+	FailureWindowAt int64
 }
 
 func (q *Queries) GetAccountModelRuntime(ctx context.Context, arg GetAccountModelRuntimeParams) (GetAccountModelRuntimeRow, error) {
@@ -105,6 +110,9 @@ func (q *Queries) GetAccountModelRuntime(ctx context.Context, arg GetAccountMode
 		&i.CooldownUntil,
 		&i.Failures,
 		&i.Version,
+		&i.Reason,
+		&i.LastFailureAt,
+		&i.FailureWindowAt,
 	)
 	return i, err
 }
@@ -151,14 +159,15 @@ func (q *Queries) ListAvailabilityModelLimits(ctx context.Context, arg ListAvail
 }
 
 const saveAccountModelRuntime = `-- name: SaveAccountModelRuntime :one
-INSERT INTO account_model_runtime(account_id,model,cooldown_until,failures,lifecycle,runtime_revision,version)
-SELECT a.id,?1,?2,?3,a.models_revision,?4,1
+INSERT INTO account_model_runtime(account_id,model,cooldown_until,failures,lifecycle,runtime_revision,version,reason,last_failure_at,failure_window_at)
+SELECT a.id,?1,?2,?3,a.models_revision,?4,1,?5,?6,?7
 FROM accounts a
-WHERE a.id=?5 AND a.tenant_id=?6
- AND a.models_revision=?7
+WHERE a.id=?8 AND a.tenant_id=?9
+ AND a.models_revision=?10
  AND COALESCE((SELECT revision FROM account_runtime WHERE account_runtime.account_id=a.id),0)=?4
 ON CONFLICT(account_id,model) DO UPDATE SET cooldown_until=excluded.cooldown_until, failures=excluded.failures,
- lifecycle=excluded.lifecycle,runtime_revision=excluded.runtime_revision,version=account_model_runtime.version+1
+ lifecycle=excluded.lifecycle,runtime_revision=excluded.runtime_revision,version=account_model_runtime.version+1,
+ reason=excluded.reason,last_failure_at=excluded.last_failure_at,failure_window_at=excluded.failure_window_at
 RETURNING version
 `
 
@@ -167,6 +176,9 @@ type SaveAccountModelRuntimeParams struct {
 	CooldownUntil   int64
 	Failures        int64
 	RuntimeRevision int64
+	Reason          string
+	LastFailureAt   int64
+	FailureWindowAt int64
 	TargetID        string
 	WorkspaceID     int64
 	Lifecycle       int64
@@ -178,6 +190,9 @@ func (q *Queries) SaveAccountModelRuntime(ctx context.Context, arg SaveAccountMo
 		arg.CooldownUntil,
 		arg.Failures,
 		arg.RuntimeRevision,
+		arg.Reason,
+		arg.LastFailureAt,
+		arg.FailureWindowAt,
 		arg.TargetID,
 		arg.WorkspaceID,
 		arg.Lifecycle,

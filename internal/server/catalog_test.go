@@ -102,7 +102,7 @@ func TestImportStartsModelDiscoveryWithoutFailingCredentialStorage(t *testing.T)
 
 func TestCachedModelsDoNotConsumeUpstreamRequestSlots(t *testing.T) {
 	f := newForwardFixture(t, func(http.ResponseWriter, *http.Request) { t.Error("fresh catalog contacted upstream") })
-	for range 30 {
+	for range f.forwarding.Policy().Capacity {
 		release, err := f.forwarding.Acquire()
 		if err != nil {
 			t.Fatal(err)

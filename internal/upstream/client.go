@@ -46,6 +46,7 @@ type Client struct {
 	engineErr         error
 	runtime           *sdkRuntime
 	http              *http.Client
+	inference         *http.Client
 	tokenURL, baseURL string
 	registry          *translator.Registry
 	version           func() string
@@ -54,10 +55,11 @@ type Client struct {
 }
 
 type Options struct {
-	Transport      http.RoundTripper
-	Version        func() string
-	GrokVersion    func() string
-	MaxRequestBody int64
+	Transport              http.RoundTripper
+	Version                func() string
+	GrokVersion            func() string
+	MaxRequestBody         int64
+	InferenceHeaderTimeout *time.Duration
 }
 
 func New() *Client {
@@ -99,11 +101,21 @@ func NewWithOptions(opts Options) *Client {
 		base.MaxIdleConnsPerHost = 8
 		transport = base
 	}
+	inferenceTransport := transport
+	if base, ok := transport.(*http.Transport); ok {
+		inference := base.Clone()
+		inference.ResponseHeaderTimeout = 5 * time.Minute
+		if opts.InferenceHeaderTimeout != nil {
+			inference.ResponseHeaderTimeout = *opts.InferenceHeaderTimeout
+		}
+		inferenceTransport = inference
+	}
 	return &Client{
 		http: &http.Client{
 			Transport:     &proxyTransport{base: transport},
 			CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 		},
+		inference:      &http.Client{Transport: &proxyTransport{base: inferenceTransport}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		tokenURL:       "https://auth.openai.com/oauth/token",
 		baseURL:        "https://chatgpt.com/backend-api/codex",
 		registry:       builtin.Registry(),

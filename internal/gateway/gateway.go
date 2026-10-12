@@ -55,6 +55,7 @@ type Service struct {
 	waiting            map[int64]int
 	capacityChanged    chan struct{}
 	accountWaitTimeout time.Duration
+	policy             Policy
 	now                func() time.Time
 	runContext         context.Context
 	stopRuntime        context.CancelFunc
@@ -85,12 +86,16 @@ func New(ctx context.Context, connection *sql.DB, accounts *accounts.Service, pr
 }
 
 func NewForTenant(ctx context.Context, connection *sql.DB, accounts *accounts.Service, provider *upstream.Client, tenantID int64, catalogs ...*pricing.Service) *Service {
+	return NewForTenantWithPolicy(ctx, connection, accounts, provider, tenantID, DefaultPolicy(), catalogs...)
+}
+
+func NewForTenantWithPolicy(ctx context.Context, connection *sql.DB, accounts *accounts.Service, provider *upstream.Client, tenantID int64, policy Policy, catalogs ...*pricing.Service) *Service {
 	runContext, stopRuntime := context.WithCancel(ctx)
 	var catalog *pricing.Service
 	if len(catalogs) > 0 {
 		catalog = catalogs[0]
 	}
-	return &Service{memberActive: make(map[int64]int64), waiting: make(map[int64]int), capacityChanged: make(chan struct{}), accountWaitTimeout: 10 * time.Second, next: make(map[string]int), health: make(map[string]*Runtime), modelHealth: make(map[modelKey]*modelRuntime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
+	return &Service{memberActive: make(map[int64]int64), waiting: make(map[int64]int), capacityChanged: make(chan struct{}), accountWaitTimeout: policy.QueueTimeout, policy: policy, next: make(map[string]int), health: make(map[string]*Runtime), modelHealth: make(map[modelKey]*modelRuntime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, policy.Capacity), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
 }
 
 func (s *Service) Acquire() (func(), error) {
@@ -148,6 +153,8 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 		return nil, err
 	}
 	requestedModel := model
+	// Retry checks inspect client content before routing adds internal session IDs.
+	original := raw
 	provider, model := groups.SplitModel(model)
 	if model == "" || len(model) > 128 {
 		return nil, upstream.ErrInput
@@ -231,7 +238,7 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 			}
 		}()
 	}
-	execute := func(c accounts.Credential) (*upstream.Stream, error) {
+	executeOnce := func(c accounts.Credential) (*upstream.Stream, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -245,6 +252,9 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 			return s.provider.Chat(upstreamCtx, c, raw, outgoing)
 		}
 		return s.provider.Responses(upstreamCtx, c, raw, outgoing, kind == Compact)
+	}
+	execute := func(c accounts.Credential) (*upstream.Stream, error) {
+		return s.executeWithRetry(ctx, entry, id, model, original, c, executeOnce)
 	}
 	if entry.record.Provider == "codex" {
 		row, err := s.queries.GetAccountUsage(ctx, id)

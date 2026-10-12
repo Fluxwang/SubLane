@@ -68,7 +68,7 @@ export function AccountLimits({
     event.preventDefault()
     if (busy) return
     const value = Number(limit)
-    const valid = Number.isInteger(value) && value >= 1 && value <= 30
+    const valid = Number.isInteger(value) && value >= 1 && value <= 1000
     setInvalid(!valid)
     if (valid) update.mutate({ id: account.id, max_concurrency: value })
   }
@@ -108,7 +108,7 @@ export function AccountLimits({
               id="account-concurrency"
               type="number"
               min={1}
-              max={30}
+              max={1000}
               step={1}
               value={limit}
               onChange={(event) => setLimit(event.target.value)}

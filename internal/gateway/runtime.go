@@ -97,7 +97,7 @@ func (s *Service) Runtime(ctx context.Context) ([]Runtime, error) {
 		state := *s.health[row.ID]
 		state.LimitedModels = row.LimitedModels
 		for _, model := range s.modelHealth {
-			if model.key.account == row.ID && model.lifecycle == row.Lifecycle && model.runtimeRevision == row.Revision && model.persistFailed && model.version == 0 && model.failures > 0 {
+			if model.key.account == row.ID && model.lifecycle == row.Lifecycle && model.runtimeRevision == row.Revision && model.persistFailed && model.version == 0 && model.cooldownUntil > 0 {
 				state.LimitedModels++
 			}
 		}
@@ -127,7 +127,7 @@ func (s *Service) Runtime(ctx context.Context) ([]Runtime, error) {
 	return result, nil
 }
 func (s *Service) SetConcurrency(ctx context.Context, id string, limit int64) error {
-	if limit < 1 || limit > 30 {
+	if limit < 1 || limit > 1000 {
 		return accounts.ErrInput
 	}
 	s.mu.Lock()
@@ -226,12 +226,15 @@ func (s *Service) accountAdmission(account accounts.Account) error {
 	}
 	return nil
 }
-func retryDelay(value string, now time.Time) int64 {
+func retryDelay(value string, now time.Time, fallback ...time.Duration) int64 {
 	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
 		return max(1, min(3600, seconds))
 	}
 	if until, err := http.ParseTime(value); err == nil {
 		return max(1, min(3600, int64(math.Ceil(until.Sub(now).Seconds()))))
+	}
+	if len(fallback) > 0 {
+		return max(1, min(3600, int64(math.Ceil(fallback[0].Seconds()))))
 	}
 	return 60
 }

@@ -70,6 +70,7 @@ type tenantRegistry struct {
 	started           time.Time
 	now               func() time.Time
 	closed            bool
+	gatewayPolicy     gateway.Policy
 	stopReap          chan struct{}
 	reapDone          chan struct{}
 }
@@ -108,7 +109,11 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 		r.enrollmentLimiter = server.NewLoginLimiter()
 	}
 	accountService := accounts.NewForTenant(r.db, r.vault, id)
-	forwarding := gateway.NewForTenant(r.ctx, r.db, accountService, r.provider, id, r.pricing)
+	policy := r.gatewayPolicy
+	if policy.Capacity == 0 {
+		policy = gateway.DefaultPolicy()
+	}
+	forwarding := gateway.NewForTenantWithPolicy(r.ctx, r.db, accountService, r.provider, id, policy, r.pricing)
 	rules := content.New(r.db, r.vault, id)
 	forwarding.SetContent(rules)
 	forwarding.SetTimeZone(r.timeZone)

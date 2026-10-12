@@ -475,7 +475,7 @@ it.each(['claude', 'antigravity'] as const)(
   },
 )
 
-it.each([1, 8, 30])(
+it.each([1, 8, 30, 64, 1000])(
   'updates an account concurrency limit to %i from scheduling settings',
   async (nextLimit) => {
     let limit = 2
@@ -528,14 +528,14 @@ it.each([1, 8, 30])(
       name: 'Scheduling settings',
     })
     const input = within(dialog).getByLabelText('Concurrent model requests')
-    for (const invalid of [0, 31, 1.5]) {
+    for (const invalid of [0, 1001, 1.5]) {
       await user.clear(input)
       await user.type(input, String(invalid))
       await user.click(
         within(dialog).getByRole('button', { name: 'Save settings' }),
       )
       expect(within(dialog).getByRole('alert').textContent).toBe(
-        'Enter a whole number from 1 to 30.',
+        'Enter a whole number from 1 to 1,000.',
       )
       expect(limit).toBe(2)
     }

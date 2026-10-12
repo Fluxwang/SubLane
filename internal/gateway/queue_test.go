@@ -226,6 +226,7 @@ func TestAccountQueueBoundsWaitingAndReleasesCanceledRequests(t *testing.T) {
 		calls.Add(1)
 		return syntheticStream(), nil
 	}))
+	s.policy.QueueLimit = 8
 	if err := s.SetConcurrency(ctx, ids["codex"], 1); err != nil {
 		t.Fatal(err)
 	}

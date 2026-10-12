@@ -50,7 +50,7 @@ export function MemberLimits({
       rpm > 6000 ||
       !Number.isInteger(max) ||
       max < 0 ||
-      max > 10
+      max > 1000
     setInvalid(Boolean(bad))
     if (bad) return
     mutation.mutate({
@@ -120,7 +120,7 @@ export function MemberLimits({
                 name="concurrency"
                 type="number"
                 min={0}
-                max={10}
+                max={1000}
                 step={1}
                 defaultValue={query.data.max_concurrency}
                 disabled={mutation.isPending}

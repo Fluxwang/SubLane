@@ -53,6 +53,10 @@ func newProviderFixture(t *testing.T, provider string, handler http.HandlerFunc)
 	return newForwardingFixture(t, provider, handler, false)
 }
 func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFunc, quota bool, maxRequestBody ...int64) forwardFixture {
+	return newConfiguredForwardFixture(t, provider, handler, quota, gateway.DefaultPolicy(), maxRequestBody...)
+}
+
+func newConfiguredForwardFixture(t *testing.T, provider string, handler http.HandlerFunc, quota bool, policy gateway.Policy, maxRequestBody ...int64) forwardFixture {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -121,7 +125,7 @@ func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFun
 	if err != nil {
 		t.Fatal(err)
 	}
-	forwarding := gateway.New(ctx, db, service, client)
+	forwarding := gateway.NewForTenantWithPolicy(ctx, db, service, client, 1, policy)
 	rules := content.New(db, key, 1)
 	forwarding.SetContent(rules)
 	t.Cleanup(forwarding.Close)

@@ -122,6 +122,7 @@ func providerFixture(t *testing.T, transport http.RoundTripper, known bool, vers
 	}), version...)
 	t.Cleanup(client.Close)
 	gateway := New(ctx, connection, service, client)
+	gateway.policy.RetryDelay = time.Millisecond
 	t.Cleanup(gateway.Close)
 	return gateway, ids
 }

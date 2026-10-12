@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/murongg/SubLane/internal/logging"
@@ -27,6 +28,37 @@ func gatewayLogRecords(t *testing.T, buffer *bytes.Buffer) []map[string]any {
 			t.Fatal(err)
 		}
 		records = append(records, record)
+	}
+}
+
+func TestRetryLogsSafeAttemptMetadata(t *testing.T) {
+	var attempts atomic.Int32
+	s, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
+		if attempts.Add(1) == 1 {
+			return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"synthetic-upstream-secret"}`))}, nil
+		}
+		return syntheticStream(), nil
+	}))
+	var buffer bytes.Buffer
+	ctx := logging.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	x, err := s.Open(ctx, 1, 1, []byte(`{"model":"synthetic-model","input":"synthetic-request-secret"}`), nil, Responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := x.Events(func([]byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	x.Body.Close()
+	logs := gatewayLogRecords(t, &buffer)
+	if len(logs) != 1 || logs[0]["msg"] != "Gateway upstream retry" || logs[0]["upstream_status"] != float64(503) || logs[0]["attempt"] != float64(1) || logs[0]["account_id"] != ids["codex"] {
+		t.Fatalf("retry lost safe attempt diagnostics: %+v", logs)
+	}
+	page, err := s.Requests(context.Background(), RequestFilter{})
+	if err != nil || len(page.Requests) != 1 || logs[0]["request_id"] != page.Requests[0].RequestID {
+		t.Fatal("retry correlation was lost", err)
+	}
+	if strings.Contains(buffer.String(), "synthetic-upstream-secret") || strings.Contains(buffer.String(), "synthetic-request-secret") {
+		t.Fatal("retry logged private content")
 	}
 }
 

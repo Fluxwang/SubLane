@@ -218,11 +218,21 @@ func sdkAuth(c accounts.Credential) *core.Auth {
 }
 func (c *Client) sdkContext(ctx context.Context, credential accounts.Credential) context.Context {
 	// This is the public SDK's documented per-request transport hook; it also provides a synthetic test seam.
-	return context.WithValue(ctx, "cliproxy.roundtripper", &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: c.codexVersion(), grokVersion: c.currentGrokVersion()})
+	return context.WithValue(ctx, "cliproxy.roundtripper", &engineTransport{base: &boundTransport{base: c.inference.Transport, address: credential.ProxyURL}, codexVersion: c.codexVersion(), grokVersion: c.currentGrokVersion()})
 }
 func sdkError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return context.DeadlineExceeded
 	}
 	var rejected *UpstreamError
 	if errors.As(err, &rejected) {
@@ -254,7 +264,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		return nil, err
 	}
 	version := c.codexVersion()
-	transport := &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: version, grokVersion: c.currentGrokVersion(), provider: credential.Kind()}
+	transport := &engineTransport{base: &boundTransport{base: c.inference.Transport, address: credential.ProxyURL}, codexVersion: version, grokVersion: c.currentGrokVersion(), provider: credential.Kind()}
 	transport.validateGeminiStream = credential.Kind() == "antigravity" && (opts.SourceFormat == translator.FormatClaude || opts.SourceFormat == translator.FormatGemini)
 	if !opts.Stream {
 		transport.maxResponseBytes = MaxBody
@@ -485,4 +495,5 @@ func (c *Client) Close() {
 		}
 	}
 	c.http.CloseIdleConnections()
+	c.inference.CloseIdleConnections()
 }
