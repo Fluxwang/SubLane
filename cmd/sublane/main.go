@@ -126,13 +126,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer codexVersions.Close()
+	grokReleases := versions.NewGrokReleases(nil)
+	defer grokReleases.Close()
+	grokVersions, err := versions.NewForProvider(ctx, db, versions.Grok, upstream.DefaultGrokVersion, grokReleases.Latest)
+	if err != nil {
+		return err
+	}
+	defer grokVersions.Close()
 	timeZone, err := timezone.New(ctx, db)
 	if err != nil {
 		return fmt.Errorf("load instance time zone: %w", err)
 	}
 	codexVersions.Start()
-	defer codexVersions.Close()
-	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, MaxRequestBody: cfg.MaxRequestBody})
+	grokVersions.Start()
+	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, GrokVersion: grokVersions.Current, MaxRequestBody: cfg.MaxRequestBody})
 	defer provider.Close()
 	if err := provider.Start(ctx); err != nil {
 		return err
@@ -149,7 +157,7 @@ func run() error {
 	defer priceCatalog.Close()
 	registry := &tenantRegistry{ctx: ctx, db: db, vault: cipher, auth: authentication,
 		alerts:  notifications,
-		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, timeZone: timeZone,
+		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, grokVersions: grokVersions, timeZone: timeZone,
 		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL, trustedProxies: cfg.TrustedProxies,
 		version: version, started: time.Now()}
 	defer registry.Close()

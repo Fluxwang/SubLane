@@ -15,6 +15,23 @@ import (
 // Public Grok Build OAuth parameters match the pinned CLIProxyAPI xAI adapter.
 const grokClientID = "b1a00492-073a-47ea-816f-4c329264a828"
 
+// The chat proxy rejects obsolete CLI versions with HTTP 426. Keep this fallback on the official stable channel.
+const DefaultGrokVersion = "1.0.50"
+
+func (c *Client) currentGrokVersion() string {
+	if c.grokVersion != nil {
+		if version := c.grokVersion(); version != "" {
+			return version
+		}
+	}
+	return DefaultGrokVersion
+}
+
+func applyGrokVersion(headers http.Header, version string) {
+	headers.Set("x-grok-client-version", version)
+	headers.Set("User-Agent", "xai-grok-workspace/"+version)
+}
+
 var (
 	ErrDeviceDenied  = errors.New("device_access_denied")
 	ErrDeviceExpired = errors.New("device_expired")

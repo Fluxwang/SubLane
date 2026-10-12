@@ -6,7 +6,7 @@ import { createQueryClient } from '@/lib/query'
 import { authKey } from '@/lib/auth'
 import { authenticated, memberAuthenticated } from '@/test/fixtures'
 import { Settings } from '@/pages/Settings'
-import { CodexVersion } from './CodexVersion'
+import { ClientVersion } from './ClientVersion'
 
 const initial = {
   manual_version: '',
@@ -25,64 +25,73 @@ const initial = {
 }
 const response = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status })
-function mount() {
+function mount(provider: 'codex' | 'grok' = 'codex') {
   const client = createQueryClient()
   client.setQueryData(authKey, authenticated)
   render(
     <QueryClientProvider client={client}>
-      <CodexVersion userID={1} />
+      <ClientVersion userID={1} provider={provider} />
     </QueryClientProvider>,
   )
   return client
 }
-it('saves a manual version and keeps it selected when a newer release is discovered', async () => {
-  const pinned = {
-    ...initial,
-    manual_version: '0.150.0',
-    auto_sync: false,
-    effective_version: '0.150.0',
-    source: 'manual',
-  }
-  const fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
-    Promise.resolve(
-      response(
-        init?.method === 'PATCH'
-          ? pinned
-          : init?.method === 'POST'
-            ? {
-                ...pinned,
-                latest_version: '0.200.0',
-                checked_at: 1900000010,
-                successful_at: 1900000010,
-                retry_after_seconds: 60,
-              }
-            : initial,
-      ),
-    ),
-  )
-  vi.stubGlobal('fetch', fetch)
-  const user = userEvent.setup()
-  mount()
-  await user.type(await screen.findByLabelText('Manual version'), '0.150.0')
-  await user.click(
-    screen.getByRole('checkbox', {
-      name: 'Automatically follow stable releases',
-    }),
-  )
-  await user.click(screen.getByRole('button', { name: 'Save settings' }))
-  expect(await screen.findByText('Settings saved.')).toBeTruthy()
-  const saved = fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')
-  expect(JSON.parse(saved![1]!.body as string)).toEqual({
-    manual_version: '0.150.0',
-    auto_sync: false,
-  })
-  await user.click(screen.getByRole('button', { name: 'Check now' }))
-  expect(await screen.findByText('0.200.0')).toBeTruthy()
-  expect(
-    (screen.getByLabelText('Manual version') as HTMLInputElement).value,
-  ).toBe('0.150.0')
-  expect(screen.getByText('0.150.0')).toBeTruthy()
-})
+it.each(['codex', 'grok'] as const)(
+  'saves a %s manual version and keeps it selected after synchronization',
+  async (provider) => {
+    const pinned = {
+      ...initial,
+      manual_version: '0.150.0',
+      auto_sync: false,
+      effective_version: '0.150.0',
+      source: 'manual',
+    }
+    const fetch = vi
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) =>
+        Promise.resolve(
+          response(
+            init?.method === 'PATCH'
+              ? pinned
+              : init?.method === 'POST'
+                ? {
+                    ...pinned,
+                    latest_version: '0.200.0',
+                    checked_at: 1900000010,
+                    successful_at: 1900000010,
+                    retry_after_seconds: 60,
+                  }
+                : initial,
+          ),
+        ),
+      )
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    mount(provider)
+    await user.type(await screen.findByLabelText('Manual version'), '0.150.0')
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'Automatically follow stable releases',
+      }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Save settings' }))
+    expect(await screen.findByText('Settings saved.')).toBeTruthy()
+    const saved = fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')
+    expect(saved![0]).toBe('/api/settings/' + provider)
+    expect(JSON.parse(saved![1]!.body as string)).toEqual({
+      manual_version: '0.150.0',
+      auto_sync: false,
+    })
+    await user.click(screen.getByRole('button', { name: 'Check now' }))
+    expect(await screen.findByText('0.200.0')).toBeTruthy()
+    expect(
+      fetch.mock.calls.find(([, init]) => init?.method === 'POST')?.[0],
+    ).toBe('/api/settings/' + provider + '/sync')
+    expect(
+      (screen.getByLabelText('Manual version') as HTMLInputElement).value,
+    ).toBe('0.150.0')
+    expect(screen.getByText('0.150.0')).toBeTruthy()
+  },
+)
 it('rejects malformed versions before sending a configuration change', async () => {
   const fetch = vi
     .fn()

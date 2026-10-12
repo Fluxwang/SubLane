@@ -49,12 +49,14 @@ type Client struct {
 	tokenURL, baseURL string
 	registry          *translator.Registry
 	version           func() string
+	grokVersion       func() string
 	maxRequestBody    int64
 }
 
 type Options struct {
 	Transport      http.RoundTripper
 	Version        func() string
+	GrokVersion    func() string
 	MaxRequestBody int64
 }
 
@@ -106,6 +108,7 @@ func NewWithOptions(opts Options) *Client {
 		baseURL:        "https://chatgpt.com/backend-api/codex",
 		registry:       builtin.Registry(),
 		version:        opts.Version,
+		grokVersion:    opts.GrokVersion,
 		maxRequestBody: requestBodyLimit(opts.MaxRequestBody),
 	}
 }

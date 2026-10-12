@@ -9,7 +9,7 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 )
 
-// Match the official Grok Build billing request and the pinned SDK's CLI version.
+// Billing and inference use the same instance-wide Grok client version policy.
 func (c *Client) grokUsage(ctx context.Context, credential accounts.Credential) (Usage, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", nil)
 	if err != nil {
@@ -19,7 +19,7 @@ func (c *Client) grokUsage(ctx context.Context, credential accounts.Credential) 
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("X-XAI-Token-Auth", "xai-grok-cli")
 	request.Header.Set("x-grok-client-mode", "cli")
-	request.Header.Set("x-grok-client-version", "0.2.120")
+	applyGrokVersion(request.Header, c.currentGrokVersion())
 	request.Header.Set("x-userid", credential.AccountID)
 	raw, err := c.subscriptionUsageResponse(request)
 	if err != nil {

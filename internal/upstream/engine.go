@@ -218,7 +218,7 @@ func sdkAuth(c accounts.Credential) *core.Auth {
 }
 func (c *Client) sdkContext(ctx context.Context, credential accounts.Credential) context.Context {
 	// This is the public SDK's documented per-request transport hook; it also provides a synthetic test seam.
-	return context.WithValue(ctx, "cliproxy.roundtripper", &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: c.codexVersion()})
+	return context.WithValue(ctx, "cliproxy.roundtripper", &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: c.codexVersion(), grokVersion: c.currentGrokVersion()})
 }
 func sdkError(err error) error {
 	if err == nil {
@@ -254,7 +254,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		return nil, err
 	}
 	version := c.codexVersion()
-	transport := &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: version, provider: credential.Kind()}
+	transport := &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: version, grokVersion: c.currentGrokVersion(), provider: credential.Kind()}
 	transport.validateGeminiStream = credential.Kind() == "antigravity" && (opts.SourceFormat == translator.FormatClaude || opts.SourceFormat == translator.FormatGemini)
 	if !opts.Stream {
 		transport.maxResponseBytes = MaxBody
@@ -370,6 +370,7 @@ type engineTransport struct {
 	validateGeminiStream bool
 	maxResponseBytes     int64
 	codexVersion         string
+	grokVersion          string
 	base                 http.RoundTripper
 	mu                   sync.Mutex
 	retryAfter           string
@@ -385,6 +386,11 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		// Clone before overriding SDK headers; unrelated providers and shared request objects remain untouched.
 		r = r.Clone(r.Context())
 		applyCodexVersion(r.Header, t.codexVersion)
+	}
+	if t.grokVersion != "" && r.URL.Host == "cli-chat-proxy.grok.com" && strings.HasPrefix(r.URL.Path, "/v1/") {
+		// Apply the durable policy after the pinned SDK's obsolete headers, without mutating its request.
+		r = r.Clone(r.Context())
+		applyGrokVersion(r.Header, t.grokVersion)
 	}
 	response, err := t.base.RoundTrip(r)
 	if err != nil {

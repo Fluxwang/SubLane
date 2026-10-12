@@ -9,7 +9,10 @@ import (
 	"github.com/murongg/SubLane/internal/versions"
 )
 
-type versionHTTP struct{ service *versions.Service }
+type versionHTTP struct {
+	service  *versions.Service
+	provider versions.Provider
+}
 
 func (h *versionHTTP) register(router chi.Router) {
 	routeErrors(router)
@@ -38,12 +41,12 @@ func (h *versionHTTP) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.ManualVersion == nil || input.AutoSync == nil {
-		versionError(w, versions.ErrInput)
+		h.versionError(w, versions.ErrInput)
 		return
 	}
 	value, err := h.service.Save(r.Context(), versions.Config{ManualVersion: *input.ManualVersion, AutoSync: *input.AutoSync})
 	if err != nil {
-		versionError(w, err)
+		h.versionError(w, err)
 		return
 	}
 	writeJSON(w, 200, value)
@@ -58,21 +61,22 @@ func (h *versionHTTP) sync(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, versions.ErrCooldown) {
 			w.Header().Set("Retry-After", strconv.FormatInt(max(1, value.RetryAfterSeconds), 10))
 		}
-		versionError(w, err)
+		h.versionError(w, err)
 		return
 	}
 	writeJSON(w, 200, value)
 }
-func versionError(w http.ResponseWriter, err error) {
-	status, code := 503, "codex_version_sync_failed"
+func (h *versionHTTP) versionError(w http.ResponseWriter, err error) {
+	provider := string(h.provider)
+	status, code := 503, provider+"_version_sync_failed"
 	if errors.Is(err, versions.ErrInput) {
-		status, code = 400, "invalid_codex_version"
+		status, code = 400, "invalid_"+provider+"_version"
 	}
 	if errors.Is(err, versions.ErrCooldown) {
-		status, code = 429, "codex_version_sync_cooldown"
+		status, code = 429, provider+"_version_sync_cooldown"
 	}
 	if errors.Is(err, versions.ErrStorage) {
-		code = "codex_version_storage_failed"
+		code = provider + "_version_storage_failed"
 	}
 	writeJSON(w, status, map[string]string{"error": code})
 }

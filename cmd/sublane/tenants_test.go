@@ -122,7 +122,7 @@ func TestRuntimeRoutesManagementToOwnedWorkspace(t *testing.T) {
 			t.Fatalf("workspace %d management: %d %s", check.workspace, w.Code, w.Body.String())
 		}
 	}
-	for _, path := range []string{"/api/settings/backup", "/api/settings/codex"} {
+	for _, path := range []string{"/api/settings/backup", "/api/settings/codex", "/api/settings/grok"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("X-SubLane-Workspace", strconv.FormatInt(workspace.ID, 10))
 		req.AddCookie(&http.Cookie{Name: "sublane_session", Value: owner.Token})

@@ -82,6 +82,14 @@ const routes = root.addChildren([
     }),
     createRoute({
       getParentRoute: () => settings,
+      path: 'grok',
+      component: lazyRouteComponent(
+        () => import('@/pages/System'),
+        'GrokSettings',
+      ),
+    }),
+    createRoute({
+      getParentRoute: () => settings,
       path: 'codex',
       component: lazyRouteComponent(
         () => import('@/pages/System'),

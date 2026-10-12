@@ -14,79 +14,84 @@ import (
 )
 
 func TestVersionPrecedencePersistenceAndMonotonicSync(t *testing.T) {
-	ctx := context.Background()
-	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "versions.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer connection.Close()
-	identity, err := auth.New(connection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := identity.Setup(ctx, "synthetic-admin", "synthetic-password", "Synthetic workspace"); err != nil {
-		t.Fatal(err)
-	}
-	clock := atomic.Int64{}
-	clock.Store(1900000000)
-	latest := "0.200.0"
-	calls := 0
-	fetch := func(context.Context) (string, error) { calls++; return latest, nil }
-	s, err := New(ctx, connection, "0.100.0", fetch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	s.now = func() time.Time { return time.Unix(clock.Load(), 0) }
-	if s.Current() != "0.100.0" || !s.View().AutoSync {
-		t.Fatal("invalid defaults", s.View())
-	}
-	if _, err := s.Sync(ctx, true); err != nil {
-		t.Fatal(err)
-	}
-	if s.Current() != "0.200.0" || s.View().Source != "synced" {
-		t.Fatal(s.View())
-	}
-	actor := audit.WithActor(ctx, audit.Actor{TenantID: 1, ID: 1, Username: "synthetic-admin", Role: "admin", Source: "user"})
-	if _, err := s.Save(actor, Config{ManualVersion: "0.150.0", AutoSync: true}); err != nil {
-		t.Fatal(err)
-	}
-	clock.Add(61)
-	latest = "0.300.0"
-	if _, err := s.Sync(ctx, true); err != nil {
-		t.Fatal(err)
-	}
-	if s.Current() != "0.150.0" || s.View().LatestVersion != "0.300.0" {
-		t.Fatal("sync replaced manual pin", s.View())
-	}
-	if _, err := s.Save(actor, Config{AutoSync: false}); err != nil {
-		t.Fatal(err)
-	}
-	if s.Current() != "0.300.0" {
-		t.Fatal("disabling sync lost known version")
-	}
-	clock.Add(61)
-	latest = "0.250.0"
-	if _, err := s.Sync(ctx, true); err != nil {
-		t.Fatal(err)
-	}
-	if s.Current() != "0.300.0" {
-		t.Fatal("automatic version downgraded")
-	}
-	reopened, err := New(ctx, connection, "0.100.0", fetch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	if reopened.Current() != "0.300.0" || reopened.View().AutoSync {
-		t.Fatal("settings did not survive restart", reopened.View())
-	}
-	var events int
-	if err := connection.QueryRow("SELECT count(*) FROM audit_events WHERE action='settings.update'").Scan(&events); err != nil || events != 2 {
-		t.Fatal("settings audit missing", events, err)
-	}
-	if calls != 3 {
-		t.Fatal("unexpected release requests", calls)
+	for _, provider := range []Provider{Codex, Grok} {
+		t.Run(string(provider), func(t *testing.T) {
+			ctx := context.Background()
+			connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "versions.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Close()
+			identity, err := auth.New(connection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := identity.Setup(ctx, "synthetic-admin", "synthetic-password", "Synthetic workspace"); err != nil {
+				t.Fatal(err)
+			}
+			clock := atomic.Int64{}
+			clock.Store(1900000000)
+			latest := "0.200.0"
+			calls := 0
+			fetch := func(context.Context) (string, error) { calls++; return latest, nil }
+			s, err := NewForProvider(ctx, connection, provider, "0.100.0", fetch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			s.now = func() time.Time { return time.Unix(clock.Load(), 0) }
+			if s.Current() != "0.100.0" || !s.View().AutoSync {
+				t.Fatal("invalid defaults", s.View())
+			}
+			if _, err := s.Sync(ctx, true); err != nil {
+				t.Fatal(err)
+			}
+			if s.Current() != "0.200.0" || s.View().Source != "synced" {
+				t.Fatal(s.View())
+			}
+			actor := audit.WithActor(ctx, audit.Actor{TenantID: 1, ID: 1, Username: "synthetic-admin", Role: "admin", Source: "user"})
+			if _, err := s.Save(actor, Config{ManualVersion: "0.150.0", AutoSync: true}); err != nil {
+				t.Fatal(err)
+			}
+			clock.Add(61)
+			latest = "0.300.0"
+			if _, err := s.Sync(ctx, true); err != nil {
+				t.Fatal(err)
+			}
+			if s.Current() != "0.150.0" || s.View().LatestVersion != "0.300.0" {
+				t.Fatal("sync replaced manual pin", s.View())
+			}
+			if _, err := s.Save(actor, Config{AutoSync: false}); err != nil {
+				t.Fatal(err)
+			}
+			if s.Current() != "0.300.0" {
+				t.Fatal("disabling sync lost known version")
+			}
+			clock.Add(61)
+			latest = "0.250.0"
+			if _, err := s.Sync(ctx, true); err != nil {
+				t.Fatal(err)
+			}
+			if s.Current() != "0.300.0" {
+				t.Fatal("automatic version downgraded")
+			}
+			reopened, err := NewForProvider(ctx, connection, provider, "0.100.0", fetch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if reopened.Current() != "0.300.0" || reopened.View().AutoSync {
+				t.Fatal("settings did not survive restart", reopened.View())
+			}
+			var events int
+			if err := connection.QueryRow("SELECT count(*) FROM audit_events WHERE action='settings.update'").Scan(&events); err != nil || events != 2 {
+				t.Fatal("settings audit missing", events, err)
+			}
+			if calls != 3 {
+				t.Fatal("unexpected release requests", calls)
+			}
+
+		})
 	}
 }
 

@@ -11,25 +11,36 @@ import {
   versionOptions,
   type VersionState,
   type VersionConfig,
+  type VersionProvider,
 } from '@/lib/version'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { useTimeZone } from '@/lib/timezone'
 
-export function CodexVersion({ userID }: { userID: number }) {
+export function ClientVersion({
+  userID,
+  provider = 'codex',
+}: {
+  userID: number
+  provider?: VersionProvider
+}) {
   const { t } = useTranslation()
   const client = useQueryClient()
-  const query = useQuery(versionOptions(client, userID))
+  const query = useQuery(versionOptions(client, userID, provider))
   return (
     <section
       className="mt-10 border-t border-border pt-6"
-      aria-labelledby="codex-version-title"
+      aria-labelledby={`${provider}-version-title`}
     >
-      <h2 id="codex-version-title" className="font-medium">
-        {t('codexVersionTitle')}
+      <h2 id={`${provider}-version-title`} className="font-medium">
+        {t(provider === 'codex' ? 'codexVersionTitle' : 'grokVersionTitle')}
       </h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        {t('codexVersionDescription')}
+        {t(
+          provider === 'codex'
+            ? 'codexVersionDescription'
+            : 'grokVersionDescription',
+        )}
       </p>
       {query.isPending ? (
         <p role="status" className="mt-5 text-sm text-muted-foreground">
@@ -37,13 +48,15 @@ export function CodexVersion({ userID }: { userID: number }) {
         </p>
       ) : query.data ? (
         <VersionForm
+          provider={provider}
+          key={provider}
           value={query.data}
           userID={userID}
           updatedAt={query.dataUpdatedAt}
         />
       ) : (
         <div role="alert" className="mt-5 space-y-3">
-          <p className="text-sm text-error">{t('codexVersionLoadFailed')}</p>
+          <p className="text-sm text-error">{t('clientVersionLoadFailed')}</p>
           <Button variant="outline" onClick={() => query.refetch()}>
             {t('reconnect')}
           </Button>
@@ -53,10 +66,12 @@ export function CodexVersion({ userID }: { userID: number }) {
   )
 }
 function VersionForm({
+  provider,
   value,
   userID,
   updatedAt,
 }: {
+  provider: VersionProvider
   value: VersionState
   userID: number
   updatedAt: number
@@ -64,7 +79,7 @@ function VersionForm({
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
   const client = useQueryClient()
-  const options = versionOptions(client, userID)
+  const options = versionOptions(client, userID, provider)
   const [manual, setManual] = useState(value.manual_version)
   const [auto, setAuto] = useState(value.auto_sync)
   const [invalid, setInvalid] = useState(false)
@@ -87,7 +102,7 @@ function VersionForm({
   }
   const save = useAdminMutation<VersionState, VersionConfig>({
     userID,
-    mutationFn: saveVersion,
+    mutationFn: (input, signal) => saveVersion(input, signal, provider),
     onSuccess: async (data) => {
       await apply(data)
       setManual(data.manual_version)
@@ -97,15 +112,15 @@ function VersionForm({
   })
   const sync = useAdminMutation({
     userID,
-    mutationFn: (_input: void, signal) => syncVersion(signal),
+    mutationFn: (_input: void, signal) => syncVersion(signal, provider),
     onSuccess: apply,
     onError: () => client.invalidateQueries({ queryKey: options.queryKey }),
   })
   const error = save.error ?? sync.error
   const sourceLabels = {
-    manual: 'codexVersionManualSource',
-    synced: 'codexVersionSyncedSource',
-    builtin: 'codexVersionBuiltinSource',
+    manual: 'clientVersionManualSource',
+    synced: 'clientVersionSyncedSource',
+    builtin: 'clientVersionBuiltinSource',
   } as const
   const date = (timestamp: number) =>
     new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
@@ -132,7 +147,7 @@ function VersionForm({
       <dl className="grid gap-5 rounded-lg bg-muted/50 p-4 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs text-muted-foreground">
-            {t('codexVersionEffective')}
+            {t('clientVersionEffective')}
           </dt>
           <dd className="mt-2 flex flex-wrap items-center gap-2">
             <code className="font-medium tabular-nums">
@@ -145,7 +160,7 @@ function VersionForm({
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">
-            {t('codexVersionLatest')}
+            {t('clientVersionLatest')}
           </dt>
           <dd className="mt-2 font-mono tabular-nums">
             {value.latest_version || '—'}
@@ -154,17 +169,20 @@ function VersionForm({
       </dl>
       <form onSubmit={submit} noValidate className="space-y-5">
         <div className="max-w-sm space-y-2">
-          <label htmlFor="codex-manual-version" className="text-sm font-medium">
-            {t('codexVersionManual')}
+          <label
+            htmlFor={`${provider}-manual-version`}
+            className="text-sm font-medium"
+          >
+            {t('clientVersionManual')}
           </label>
           <Input
-            id="codex-manual-version"
+            id={`${provider}-manual-version`}
             value={manual}
             onChange={(event) => {
               setManual(event.target.value)
               edit()
             }}
-            placeholder={t('codexVersionAutomatic', {
+            placeholder={t('clientVersionAutomatic', {
               version: value.default_version,
             })}
             maxLength={24}
@@ -172,20 +190,20 @@ function VersionForm({
             autoComplete="off"
             spellCheck={false}
             aria-invalid={invalid}
-            aria-describedby="codex-version-hint"
+            aria-describedby={`${provider}-version-hint`}
           />
           <p
-            id="codex-version-hint"
+            id={`${provider}-version-hint`}
             className="text-xs leading-5 text-muted-foreground"
           >
-            {t('codexVersionManualHint')}
+            {t('clientVersionManualHint')}
           </p>
         </div>
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
-            aria-labelledby="codex-version-auto-label"
-            aria-describedby="codex-version-auto-hint"
+            aria-labelledby={`${provider}-version-auto-label`}
+            aria-describedby={`${provider}-version-auto-hint`}
             checked={auto}
             onChange={(event) => {
               setAuto(event.target.checked)
@@ -195,30 +213,37 @@ function VersionForm({
             className="mt-0.5 size-4 shrink-0 accent-primary"
           />
           <span>
-            <span id="codex-version-auto-label" className="text-sm font-medium">
-              {t('codexVersionAuto')}
+            <span
+              id={`${provider}-version-auto-label`}
+              className="text-sm font-medium"
+            >
+              {t('clientVersionAuto')}
             </span>
             <span
-              id="codex-version-auto-hint"
+              id={`${provider}-version-auto-hint`}
               className="mt-1 block text-xs leading-5 text-muted-foreground"
             >
-              {t('codexVersionAutoHint')}
+              {t(
+                provider === 'codex'
+                  ? 'codexVersionAutoHint'
+                  : 'grokVersionAutoHint',
+              )}
             </span>
           </span>
         </label>
         {invalid && (
           <p role="alert" className="text-sm text-error">
-            {t('codexVersionInvalid')}
+            {t('clientVersionInvalid')}
           </p>
         )}
         {!invalid && error && (
           <p role="alert" className="text-sm text-error">
-            {t(versionErrorKey(error))}
+            {t(versionErrorKey(error, provider))}
           </p>
         )}
         {saved && (
           <p role="status" className="text-sm text-success">
-            {t('codexVersionSaved')}
+            {t('clientVersionSaved')}
           </p>
         )}
         <div className="flex flex-wrap items-center gap-3">
@@ -229,7 +254,7 @@ function VersionForm({
                 className="motion-safe:animate-spin"
               />
             )}
-            {t('codexVersionSave')}
+            {t('clientVersionSave')}
           </Button>
           <Button
             type="button"
@@ -248,29 +273,29 @@ function VersionForm({
                   : undefined
               }
             />
-            {t('codexVersionCheck')}
+            {t('clientVersionCheck')}
           </Button>
         </div>
       </form>
       <div className="space-y-1.5 text-xs leading-5 text-muted-foreground">
         {value.syncing ? (
-          <p role="status">{t('codexVersionChecking')}</p>
+          <p role="status">{t('clientVersionChecking')}</p>
         ) : value.sync_failed && !error ? (
           <p role="status" className="text-warning">
-            {t('codexVersionSyncFailed')}
+            {t('clientVersionSyncFailed')}
           </p>
         ) : null}
         <p>
           {value.checked_at
-            ? t('codexVersionChecked', { time: date(value.checked_at) })
-            : t('codexVersionNeverChecked')}
+            ? t('clientVersionChecked', { time: date(value.checked_at) })
+            : t('clientVersionNeverChecked')}
         </p>
         {value.auto_sync && value.next_check_at > 0 && (
           <p>
-            {t('codexVersionNextCheck', { time: date(value.next_check_at) })}
+            {t('clientVersionNextCheck', { time: date(value.next_check_at) })}
           </p>
         )}
-        {!value.auto_sync && <p>{t('codexVersionAutoOff')}</p>}
+        {!value.auto_sync && <p>{t('clientVersionAutoOff')}</p>}
       </div>
     </div>
   )

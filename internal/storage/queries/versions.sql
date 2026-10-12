@@ -1,6 +1,6 @@
--- name: GetCodexVersionState :one
-SELECT value FROM settings WHERE key = 'codex.version';
+-- name: GetClientVersionState :one
+SELECT value FROM settings WHERE key = sqlc.arg(key);
 
--- name: SaveCodexVersionState :exec
-INSERT INTO settings(key,value) VALUES('codex.version',sqlc.arg(value))
+-- name: SaveClientVersionState :exec
+INSERT INTO settings(key,value) VALUES(sqlc.arg(key),sqlc.arg(value))
 ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP;

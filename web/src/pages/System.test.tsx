@@ -177,6 +177,7 @@ it.each([1, 2])(
 
 it.each([
   '/admin/settings/codex',
+  '/admin/settings/grok',
   '/admin/settings/timezone',
   '/admin/settings/backup',
 ])(
@@ -203,3 +204,23 @@ it.each([
     ).toBe(false)
   },
 )
+
+it('opens Grok version settings with its own configuration endpoint', async () => {
+  const fetch = session()
+  open('/admin/settings/grok')
+  expect(
+    await screen.findByRole('heading', { name: 'Grok client version' }),
+  ).toBeTruthy()
+  expect(await screen.findByLabelText('Manual version')).toBeTruthy()
+  expect(fetch.mock.calls.some(([url]) => url === '/api/settings/grok')).toBe(
+    true,
+  )
+  expect(fetch.mock.calls.some(([url]) => url === '/api/settings/codex')).toBe(
+    false,
+  )
+  expect(
+    screen
+      .getByRole('link', { name: 'Grok client version' })
+      .getAttribute('aria-current'),
+  ).toBe('page')
+})

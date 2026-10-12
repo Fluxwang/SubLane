@@ -81,6 +81,7 @@ const navigation = [
           { to: '/admin/settings/alerts', label: 'alertsTitle' },
           { to: '/admin/settings/timezone', label: 'timeZoneTitle' },
           { to: '/admin/settings/codex', label: 'codexVersionTitle' },
+          { to: '/admin/settings/grok', label: 'grokVersionTitle' },
           { to: '/admin/settings/backup', label: 'backupTitle' },
         ],
       },

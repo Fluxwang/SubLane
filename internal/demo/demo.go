@@ -44,14 +44,15 @@ type Options struct {
 }
 
 type Instance struct {
-	Handler    http.Handler
-	directory  string
-	connection *sql.DB
-	gateway    *gateway.Service
-	provider   *upstream.Client
-	versions   *versions.Service
-	once       sync.Once
-	closeErr   error
+	Handler      http.Handler
+	directory    string
+	connection   *sql.DB
+	gateway      *gateway.Service
+	provider     *upstream.Client
+	versions     *versions.Service
+	grokVersions *versions.Service
+	once         sync.Once
+	closeErr     error
 }
 
 func New(ctx context.Context, options Options) (_ *Instance, err error) {
@@ -104,6 +105,14 @@ func New(ctx context.Context, options Options) (_ *Instance, err error) {
 	if _, err = versionPolicy.Save(ctx, versions.Config{AutoSync: false}); err != nil {
 		return nil, err
 	}
+	grokPolicy, err := versions.NewForProvider(ctx, connection, versions.Grok, upstream.DefaultGrokVersion, func(context.Context) (string, error) { return "", errors.New("demo_read_only") })
+	if err != nil {
+		return nil, err
+	}
+	instance.grokVersions = grokPolicy
+	if _, err = grokPolicy.Save(ctx, versions.Config{AutoSync: false}); err != nil {
+		return nil, err
+	}
 	tenancy := tenants.New(connection)
 	handler := server.New(server.Options{
 		Demo:    &server.DemoCredentials{Username: Username, Password: Password},
@@ -112,7 +121,7 @@ func New(ctx context.Context, options Options) (_ *Instance, err error) {
 		Keys: keys, Accounts: accountService, Gateway: forwarding, Groups: poolService,
 		Pricing: pricing.NewStatic(nil),
 		Tenants: tenancy, TenantID: 1, PublicURL: options.PublicURL, TrustedProxies: options.TrustedProxies,
-		CodexVersions: versionPolicy, TimeZone: zone,
+		CodexVersions: versionPolicy, GrokVersions: grokPolicy, TimeZone: zone,
 		// Expose configuration reads without starting the outbound notification worker.
 		Alerts:  alerts.New(connection, cipher, nil),
 		Content: content.New(connection, cipher, 1),
@@ -131,6 +140,9 @@ func (i *Instance) Close() error {
 		}
 		if i.versions != nil {
 			i.versions.Close()
+		}
+		if i.grokVersions != nil {
+			i.grokVersions.Close()
 		}
 		if i.connection != nil {
 			i.closeErr = i.connection.Close()

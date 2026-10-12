@@ -9,23 +9,28 @@ import (
 	"context"
 )
 
-const getCodexVersionState = `-- name: GetCodexVersionState :one
-SELECT value FROM settings WHERE key = 'codex.version'
+const getClientVersionState = `-- name: GetClientVersionState :one
+SELECT value FROM settings WHERE key = ?1
 `
 
-func (q *Queries) GetCodexVersionState(ctx context.Context) (string, error) {
-	row := q.db.QueryRowContext(ctx, getCodexVersionState)
+func (q *Queries) GetClientVersionState(ctx context.Context, key string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getClientVersionState, key)
 	var value string
 	err := row.Scan(&value)
 	return value, err
 }
 
-const saveCodexVersionState = `-- name: SaveCodexVersionState :exec
-INSERT INTO settings(key,value) VALUES('codex.version',?1)
+const saveClientVersionState = `-- name: SaveClientVersionState :exec
+INSERT INTO settings(key,value) VALUES(?1,?2)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP
 `
 
-func (q *Queries) SaveCodexVersionState(ctx context.Context, value string) error {
-	_, err := q.db.ExecContext(ctx, saveCodexVersionState, value)
+type SaveClientVersionStateParams struct {
+	Key   string
+	Value string
+}
+
+func (q *Queries) SaveClientVersionState(ctx context.Context, arg SaveClientVersionStateParams) error {
+	_, err := q.db.ExecContext(ctx, saveClientVersionState, arg.Key, arg.Value)
 	return err
 }

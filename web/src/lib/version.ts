@@ -22,11 +22,17 @@ const schema = z.object({
   sync_failed: z.boolean(),
 })
 export type VersionState = z.infer<typeof schema>
+export type VersionProvider = 'codex' | 'grok'
 export type VersionConfig = Pick<VersionState, 'manual_version' | 'auto_sync'>
-export function versionOptions(client: QueryClient, userID: number) {
+export function versionOptions(
+  client: QueryClient,
+  userID: number,
+  provider: VersionProvider = 'codex',
+) {
   return queryOptions({
-    queryKey: ['codex-version', userID],
-    queryFn: ({ signal }) => request('/api/settings/codex', schema, { signal }),
+    queryKey: [provider + '-version', userID],
+    queryFn: ({ signal }) =>
+      request('/api/settings/' + provider, schema, { signal }),
     enabled: () => {
       const user = client.getQueryData<AuthState>(authKey)?.user
       return user?.id === userID && user.role === 'admin'
@@ -36,28 +42,39 @@ export function versionOptions(client: QueryClient, userID: number) {
       query.state.error ? false : query.state.data?.syncing ? 1000 : 60_000,
   })
 }
-export function saveVersion(input: VersionConfig, signal: AbortSignal) {
-  return request('/api/settings/codex', schema, {
+export function saveVersion(
+  input: VersionConfig,
+  signal: AbortSignal,
+  provider: VersionProvider = 'codex',
+) {
+  return request('/api/settings/' + provider, schema, {
     method: 'PATCH',
     body: JSON.stringify(input),
     signal,
   })
 }
-export function syncVersion(signal: AbortSignal) {
-  return request('/api/settings/codex/sync', schema, {
+export function syncVersion(
+  signal: AbortSignal,
+  provider: VersionProvider = 'codex',
+) {
+  return request('/api/settings/' + provider + '/sync', schema, {
     method: 'POST',
     body: '{}',
     signal,
   })
 }
-export function versionErrorKey(error: Error) {
+export function versionErrorKey(
+  error: Error,
+  provider: VersionProvider = 'codex',
+) {
   if (error instanceof ApiError) {
     if (error.code === 'demo_read_only') return 'demoReadOnly'
-    if (error.code === 'invalid_codex_version') return 'codexVersionInvalid'
-    if (error.code === 'codex_version_sync_cooldown')
-      return 'codexVersionCooldown'
-    if (error.code === 'codex_version_storage_failed')
-      return 'codexVersionSaveFailed'
+    if (error.code === 'invalid_' + provider + '_version')
+      return 'clientVersionInvalid'
+    if (error.code === provider + '_version_sync_cooldown')
+      return 'clientVersionCooldown'
+    if (error.code === provider + '_version_storage_failed')
+      return 'clientVersionSaveFailed'
   }
-  return 'codexVersionSyncFailed'
+  return 'clientVersionSyncFailed'
 }

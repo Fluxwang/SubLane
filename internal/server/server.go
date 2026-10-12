@@ -53,6 +53,7 @@ type Options struct {
 	LoginLimiter      *LoginLimiter
 	EnrollmentLimiter *LoginLimiter
 	CodexVersions     *versions.Service
+	GrokVersions      *versions.Service
 	TimeZone          *timezone.Service
 	ProxyCheck        func(context.Context, string) (upstream.ProxyCheck, error)
 }
@@ -223,7 +224,11 @@ func New(o Options) http.Handler {
 		})
 		management.Route("/settings/codex", func(settings chi.Router) {
 			settings.Use(requirePlatformAdmin(tenantID))
-			(&versionHTTP{service: o.CodexVersions}).register(settings)
+			(&versionHTTP{service: o.CodexVersions, provider: versions.Codex}).register(settings)
+		})
+		management.Route("/settings/grok", func(settings chi.Router) {
+			settings.Use(requirePlatformAdmin(tenantID))
+			(&versionHTTP{service: o.GrokVersions, provider: versions.Grok}).register(settings)
 		})
 		management.Route("/settings/timezone", func(settings chi.Router) {
 			settings.Use(requirePlatformAdmin(tenantID))

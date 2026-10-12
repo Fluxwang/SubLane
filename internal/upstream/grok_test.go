@@ -6,12 +6,108 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
 )
+
+func TestGrokInferenceMeetsCurrentClientVersionFloor(t *testing.T) {
+	client := NewWithTransport(usageTransport(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusOK
+		body := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic-response\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+		version := r.Header.Get("x-grok-client-version")
+		parts := strings.Split(version, ".")
+		acceptable := false
+		if len(parts) == 3 {
+			major, _ := strconv.Atoi(parts[0])
+			minor, _ := strconv.Atoi(parts[1])
+			patch, _ := strconv.Atoi(parts[2])
+			acceptable = major > 1 || major == 1 && (minor > 0 || patch >= 13)
+		}
+		if !acceptable || r.Header.Get("User-Agent") != "xai-grok-workspace/"+version {
+			status, body = http.StatusUpgradeRequired, `{"error":"synthetic obsolete client version"}`
+		}
+		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}))
+	defer client.Close()
+	credential := accounts.Credential{Provider: "xai", AccountID: "synthetic-subject", AccessToken: "synthetic-access", ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	response, err := client.Chat(context.Background(), credential, []byte(`{"model":"synthetic-model","messages":[{"role":"user","content":"Synthetic prompt."}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("Grok inference rejected the client version: HTTP %d", response.StatusCode)
+	}
+}
+
+func TestConfiguredGrokVersionReachesInferenceAndBilling(t *testing.T) {
+	version := "1.200.0"
+	resolutions, calls := 0, 0
+	client := NewWithOptions(Options{GrokVersion: func() string { resolutions++; return version }, Transport: usageTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Header.Get("x-grok-client-version") != version || r.Header.Get("User-Agent") != "xai-grok-workspace/"+version {
+			t.Fatal("configured Grok version did not reach outbound headers", r.Header)
+		}
+		body := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic-response\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+		if r.URL.Path == "/v1/billing" {
+			body = `{"config":null}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	defer client.Close()
+	credential := accounts.Credential{Provider: "xai", AccountID: "synthetic-subject", AccessToken: "synthetic-access", ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	for _, current := range []string{"1.200.0", "1.201.0"} {
+		version = current
+		response, err := client.Chat(context.Background(), credential, []byte(`{"model":"synthetic-model","messages":[{"role":"user","content":"Synthetic prompt."}]}`), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if _, err := client.Usage(context.Background(), credential); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resolutions != 4 || calls != 4 {
+		t.Fatal("version was not captured once per operation", resolutions, calls)
+	}
+}
+
+func TestGrokVersionOverrideIsScopedAndDoesNotMutateSDKRequest(t *testing.T) {
+	for _, target := range []string{
+		"https://cli-chat-proxy.grok.com/v1/responses",
+		"https://api.x.ai/v1/models",
+		"https://auth.x.ai/oauth2/token",
+		"https://untrusted.example.test/v1/responses",
+	} {
+		request, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("User-Agent", "synthetic-sdk-agent")
+		transport := &engineTransport{grokVersion: "1.200.0", base: usageTransport(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host == "cli-chat-proxy.grok.com" {
+				if r.Header.Get("x-grok-client-version") != "1.200.0" {
+					t.Fatal("missing scoped version override")
+				}
+			} else if r.Header.Get("x-grok-client-version") != "" || r.Header.Get("User-Agent") != "synthetic-sdk-agent" {
+				t.Fatal("unrelated upstream headers were overwritten")
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: http.NoBody}, nil
+		})}
+		response, err := transport.RoundTrip(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if request.Header.Get("x-grok-client-version") != "" || request.Header.Get("User-Agent") != "synthetic-sdk-agent" {
+			t.Fatal("SDK request object was mutated")
+		}
+	}
+}
 
 func TestGrokDiscoveryAndExecutionUseSubscription(t *testing.T) {
 	calls := 0

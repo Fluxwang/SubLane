@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { CodexVersion } from '@/components/CodexVersion'
+import { ClientVersion } from '@/components/ClientVersion'
 import { TimeZoneSettings } from '@/components/TimeZoneSettings'
 import { WorkspaceAlerts } from '@/components/WorkspaceAlerts'
 import { authOptions } from '@/lib/auth'
@@ -39,7 +39,14 @@ export function AlertSettings() {
 export function CodexSettings() {
   const { data } = useQuery(authOptions())
   return data?.user?.role === 'admin' ? (
-    <CodexVersion key={data.user.id} userID={data.user.id} />
+    <ClientVersion key={data.user.id} userID={data.user.id} />
+  ) : null
+}
+
+export function GrokSettings() {
+  const { data } = useQuery(authOptions())
+  return data?.user?.role === 'admin' && data.user.id === 1 ? (
+    <ClientVersion key={data.user.id} userID={data.user.id} provider="grok" />
   ) : null
 }
 

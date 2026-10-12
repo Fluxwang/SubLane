@@ -15,6 +15,10 @@ const releasesURL = "https://api.github.com/repos/openai/codex/releases"
 type Releases struct{ client *http.Client }
 
 func NewReleases(transport http.RoundTripper) *Releases {
+	return &Releases{client: newReleaseClient(transport)}
+}
+
+func newReleaseClient(transport http.RoundTripper) *http.Client {
 	if transport == nil {
 		t := http.DefaultTransport.(*http.Transport).Clone()
 		t.ResponseHeaderTimeout = 10 * time.Second
@@ -23,7 +27,7 @@ func NewReleases(transport http.RoundTripper) *Releases {
 		t.IdleConnTimeout = 30 * time.Second
 		transport = t
 	}
-	return &Releases{client: &http.Client{Transport: transport, Timeout: checkTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &http.Client{Transport: transport, Timeout: checkTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 func (r *Releases) Close() { r.client.CloseIdleConnections() }
 
@@ -59,6 +63,13 @@ func (r *Releases) request(ctx context.Context, url string) (*http.Response, err
 	if err != nil {
 		return nil, ErrSync
 	}
+	if err := releaseResponseError(response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func releaseResponseError(response *http.Response) error {
 	if response.StatusCode != http.StatusOK {
 		response.Body.Close()
 		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusForbidden {
@@ -71,11 +82,11 @@ func (r *Releases) request(ctx context.Context, url string) (*http.Response, err
 					delay = max(delay, min(syncInterval, time.Until(time.Unix(reset, 0))))
 				}
 			}
-			return nil, &rateLimit{retry: delay}
+			return &rateLimit{retry: delay}
 		}
-		return nil, ErrSync
+		return ErrSync
 	}
-	return response, nil
+	return nil
 }
 func (r *Releases) Latest(ctx context.Context) (string, error) {
 	response, err := r.request(ctx, releasesURL+"/latest")

@@ -536,37 +536,42 @@ export const en = {
     'Could not save the time zone. The current setting is unchanged.',
   timeZoneSaved: 'Time zone saved.',
   timeZoneSave: 'Save time zone',
+  grokVersionTitle: 'Grok client version',
+  grokVersionDescription:
+    'Instance-wide settings for Grok subscription requests and quota queries. Version checks read official package metadata.',
+  grokVersionAutoHint:
+    'Check the official Grok npm package’s latest stable release every 6 hours. Failed checks keep the last known version.',
   codexVersionTitle: 'Codex client version',
   codexVersionDescription:
     'Instance-wide settings for Codex model discovery and requests. Version checks read official release metadata; they do not install software.',
-  codexVersionManual: 'Manual version',
-  codexVersionManualHint:
+  clientVersionManual: 'Manual version',
+  clientVersionManualHint:
     'Leave blank to use the last synchronized stable version or the built-in default. A manual version always takes priority.',
-  codexVersionAuto: 'Automatically follow stable releases',
+  clientVersionAuto: 'Automatically follow stable releases',
   codexVersionAutoHint:
     'Check official Codex releases on GitHub every 6 hours. Failed checks keep the last known version.',
-  codexVersionAutoOff:
+  clientVersionAutoOff:
     'Automatic checks are off. The last synchronized version is kept.',
-  codexVersionEffective: 'Effective version',
-  codexVersionLatest: 'Last synchronized stable version',
-  codexVersionAutomatic: 'Automatic · built-in {{version}}',
-  codexVersionManualSource: 'Manual',
-  codexVersionSyncedSource: 'Synchronized',
-  codexVersionBuiltinSource: 'Built-in',
-  codexVersionSave: 'Save settings',
-  codexVersionCheck: 'Check now',
-  codexVersionChecking: 'Checking official releases…',
-  codexVersionChecked: 'Last check: {{time}}',
-  codexVersionNextCheck: 'Next automatic check: {{time}}',
-  codexVersionNeverChecked: 'No version check has completed yet.',
-  codexVersionInvalid: 'Enter a stable version in major.minor.patch format.',
-  codexVersionLoadFailed: 'Could not load Codex version settings.',
-  codexVersionSaveFailed:
+  clientVersionEffective: 'Effective version',
+  clientVersionLatest: 'Last synchronized stable version',
+  clientVersionAutomatic: 'Automatic · built-in {{version}}',
+  clientVersionManualSource: 'Manual',
+  clientVersionSyncedSource: 'Synchronized',
+  clientVersionBuiltinSource: 'Built-in',
+  clientVersionSave: 'Save settings',
+  clientVersionCheck: 'Check now',
+  clientVersionChecking: 'Checking official releases…',
+  clientVersionChecked: 'Last check: {{time}}',
+  clientVersionNextCheck: 'Next automatic check: {{time}}',
+  clientVersionNeverChecked: 'No version check has completed yet.',
+  clientVersionInvalid: 'Enter a stable version in major.minor.patch format.',
+  clientVersionLoadFailed: 'Could not load client version settings.',
+  clientVersionSaveFailed:
     'Could not save version settings. The current configuration is unchanged.',
-  codexVersionSyncFailed:
+  clientVersionSyncFailed:
     'The version check failed. The last known version is still active.',
-  codexVersionCooldown: 'Please wait before checking for another release.',
-  codexVersionSaved: 'Settings saved.',
+  clientVersionCooldown: 'Please wait before checking for another release.',
+  clientVersionSaved: 'Settings saved.',
 
   reasonModelUnavailable: 'No account supports this model',
   reasonCatalogUnavailable: 'Model catalog unavailable',

@@ -1,4 +1,4 @@
-// Package versions owns instance-wide Codex version policy and release-check lifecycle.
+// Package versions owns instance-wide client version policies and release-check lifecycles.
 package versions
 
 import (
@@ -22,10 +22,10 @@ const syncInterval = 6 * time.Hour
 const checkTimeout = 30 * time.Second
 const manualCooldown = time.Minute
 
-var ErrInput = errors.New("invalid_codex_version")
-var ErrSync = errors.New("codex_version_sync_failed")
-var ErrCooldown = errors.New("codex_version_sync_cooldown")
-var ErrStorage = errors.New("codex_version_storage_failed")
+var ErrInput = errors.New("invalid_client_version")
+var ErrSync = errors.New("client_version_sync_failed")
+var ErrCooldown = errors.New("client_version_sync_cooldown")
+var ErrStorage = errors.New("client_version_storage_failed")
 var stableVersion = regexp.MustCompile(`^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$`)
 
 type Config struct {
@@ -56,6 +56,13 @@ type State struct {
 	SyncFailed        bool   `json:"sync_failed"`
 }
 type Fetcher func(context.Context) (string, error)
+type Provider string
+
+const (
+	Codex Provider = "codex"
+	Grok  Provider = "grok"
+)
+
 type operation struct {
 	done       chan struct{}
 	cancel     context.CancelFunc
@@ -64,6 +71,7 @@ type operation struct {
 	err        error
 }
 type Service struct {
+	provider        Provider
 	connection      *sql.DB
 	queries         *db.Queries
 	fallback        string
@@ -105,13 +113,21 @@ func compare(a, b string) int {
 	return 0
 }
 func New(parent context.Context, connection *sql.DB, fallback string, fetch Fetcher) (*Service, error) {
+	return NewForProvider(parent, connection, Codex, fallback, fetch)
+}
+
+func NewForProvider(parent context.Context, connection *sql.DB, provider Provider, fallback string, fetch Fetcher) (*Service, error) {
+	if provider != Codex && provider != Grok {
+		return nil, ErrInput
+	}
 	fallback, err := normalize(fallback)
 	if err != nil || fallback == "" || fetch == nil {
 		return nil, ErrInput
 	}
 	value := record{Config: Config{AutoSync: true}}
 	queries := db.New(connection)
-	raw, err := queries.GetCodexVersionState(parent)
+	// Keep the existing Codex key so upgrades preserve manual pins and synchronization history.
+	raw, err := queries.GetClientVersionState(parent, string(provider)+".version")
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrStorage
 	}
@@ -130,7 +146,7 @@ func New(parent context.Context, connection *sql.DB, fallback string, fetch Fetc
 		}
 	}
 	ctx, cancel := context.WithCancel(parent)
-	s := &Service{connection: connection, queries: queries, fallback: fallback, fetch: fetch, now: time.Now, state: value, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1)}
+	s := &Service{provider: provider, connection: connection, queries: queries, fallback: fallback, fetch: fetch, now: time.Now, state: value, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1)}
 	effective, _ := s.effective(value)
 	s.current.Store(effective)
 	return s, nil
@@ -171,11 +187,11 @@ func (s *Service) persist(ctx context.Context, value record, manual bool) error 
 	}
 	defer tx.Rollback()
 	q := s.queries.WithTx(tx)
-	if err := q.SaveCodexVersionState(ctx, string(raw)); err != nil {
+	if err := q.SaveClientVersionState(ctx, db.SaveClientVersionStateParams{Key: string(s.provider) + ".version", Value: string(raw)}); err != nil {
 		return ErrStorage
 	}
 	if manual {
-		if err := audit.Record(ctx, q, "settings.update", "settings", "codex"); err != nil {
+		if err := audit.Record(ctx, q, "settings.update", "settings", string(s.provider)); err != nil {
 			return ErrStorage
 		}
 	}
