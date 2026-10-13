@@ -30,11 +30,13 @@ import (
 )
 
 type sdkRuntime struct {
-	manager *core.Manager
-	address string
-	cancel  context.CancelFunc
-	done    chan error
-	dir     string
+	manager              *core.Manager
+	address              string
+	cancel               context.CancelFunc
+	done                 chan error
+	dir                  string
+	claudeCachedVersion  string
+	claudeCachedExecutor core.ProviderExecutor
 }
 
 // The manager is only an executor registry. Credentials remain in SubLane's encrypted store.
@@ -57,7 +59,7 @@ func (c *Client) Start(parent context.Context) error {
 	c.engineOnce.Do(func() { c.runtime, c.engineErr = c.startEngine(parent) })
 	return c.engineErr
 }
-func (c *Client) startEngine(parent context.Context) (*sdkRuntime, error) {
+func (c *Client) startEngine(parent context.Context, claudeVersions ...string) (*sdkRuntime, error) {
 	dir, err := os.MkdirTemp("", "sublane-engine-")
 	if err != nil {
 		return nil, err
@@ -78,6 +80,11 @@ func (c *Client) startEngine(parent context.Context) (*sdkRuntime, error) {
 	port := reservation.Addr().(*net.TCPAddr).Port
 	reservation.Close()
 	cfg := &sdkconfig.Config{Host: "127.0.0.1", Port: port, AuthDir: dir, RemoteManagement: sdkconfig.RemoteManagement{DisableControlPanel: true, DisableAutoUpdatePanel: true}}
+	claudeVersion := DefaultClaudeVersion
+	if len(claudeVersions) != 0 {
+		claudeVersion = claudeVersions[0]
+	}
+	configureClaudeSDK(cfg, claudeVersion)
 	// Preserve caller tool definitions; do not inject an image tool into every coding request.
 	if err := json.Unmarshal([]byte(`"passthrough"`), &cfg.DisableImageGeneration); err != nil {
 		return fail(err)
@@ -262,6 +269,16 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 	executor, err := c.executor(credential.Kind())
 	if err != nil {
 		return nil, err
+	}
+	if credential.Kind() == "claude" {
+		executor, err = c.versionedClaudeExecutor(ctx, c.currentClaudeVersion())
+		if err != nil {
+			return nil, err
+		}
+		body, opts, err = c.prepareClaude(body, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	version := c.codexVersion()
 	transport := &engineTransport{base: &boundTransport{base: c.inference.Transport, address: credential.ProxyURL}, codexVersion: version, grokVersion: c.currentGrokVersion(), provider: credential.Kind()}

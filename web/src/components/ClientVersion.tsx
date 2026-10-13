@@ -17,6 +17,24 @@ import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { useTimeZone } from '@/lib/timezone'
 
+const providerCopy = {
+  codex: {
+    title: 'codexVersionTitle',
+    description: 'codexVersionDescription',
+    autoHint: 'codexVersionAutoHint',
+  },
+  grok: {
+    title: 'grokVersionTitle',
+    description: 'grokVersionDescription',
+    autoHint: 'grokVersionAutoHint',
+  },
+  claude: {
+    title: 'claudeVersionTitle',
+    description: 'claudeVersionDescription',
+    autoHint: 'claudeVersionAutoHint',
+  },
+} as const
+
 export function ClientVersion({
   userID,
   provider = 'codex',
@@ -33,14 +51,10 @@ export function ClientVersion({
       aria-labelledby={`${provider}-version-title`}
     >
       <h2 id={`${provider}-version-title`} className="font-medium">
-        {t(provider === 'codex' ? 'codexVersionTitle' : 'grokVersionTitle')}
+        {t(providerCopy[provider].title)}
       </h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        {t(
-          provider === 'codex'
-            ? 'codexVersionDescription'
-            : 'grokVersionDescription',
-        )}
+        {t(providerCopy[provider].description)}
       </p>
       {query.isPending ? (
         <p role="status" className="mt-5 text-sm text-muted-foreground">
@@ -223,11 +237,7 @@ function VersionForm({
               id={`${provider}-version-auto-hint`}
               className="mt-1 block text-xs leading-5 text-muted-foreground"
             >
-              {t(
-                provider === 'codex'
-                  ? 'codexVersionAutoHint'
-                  : 'grokVersionAutoHint',
-              )}
+              {t(providerCopy[provider].autoHint)}
             </span>
           </span>
         </label>

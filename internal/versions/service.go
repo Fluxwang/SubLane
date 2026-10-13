@@ -59,8 +59,9 @@ type Fetcher func(context.Context) (string, error)
 type Provider string
 
 const (
-	Codex Provider = "codex"
-	Grok  Provider = "grok"
+	Codex  Provider = "codex"
+	Grok   Provider = "grok"
+	Claude Provider = "claude"
 )
 
 type operation struct {
@@ -117,7 +118,7 @@ func New(parent context.Context, connection *sql.DB, fallback string, fetch Fetc
 }
 
 func NewForProvider(parent context.Context, connection *sql.DB, provider Provider, fallback string, fetch Fetcher) (*Service, error) {
-	if provider != Codex && provider != Grok {
+	if provider != Codex && provider != Grok && provider != Claude {
 		return nil, ErrInput
 	}
 	fallback, err := normalize(fallback)

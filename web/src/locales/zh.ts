@@ -492,6 +492,11 @@ export const zh: Record<keyof typeof en, string> = {
   timeZoneSaveFailed: '无法保存时区，当前设置保持不变。',
   timeZoneSaved: '时区已保存。',
   timeZoneSave: '保存时区',
+  claudeVersionTitle: 'Claude 客户端版本',
+  claudeVersionDescription:
+    '此配置影响整个实例的 Claude 订阅请求。新请求使用当前生效版本，正在执行的请求保留原版本。',
+  claudeVersionAutoHint:
+    '每 6 小时检查官方 Claude Code npm 软件包的 stable 稳定渠道，检查失败时保留上次版本。',
   grokVersionTitle: 'Grok 客户端版本',
   grokVersionDescription:
     '此配置影响整个实例的 Grok 订阅请求与额度查询。版本检查读取官方软件包发布信息。',

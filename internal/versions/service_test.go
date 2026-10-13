@@ -14,7 +14,7 @@ import (
 )
 
 func TestVersionPrecedencePersistenceAndMonotonicSync(t *testing.T) {
-	for _, provider := range []Provider{Codex, Grok} {
+	for _, provider := range []Provider{Codex, Grok, Claude} {
 		t.Run(string(provider), func(t *testing.T) {
 			ctx := context.Background()
 			connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "versions.db"))

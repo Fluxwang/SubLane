@@ -536,6 +536,11 @@ export const en = {
     'Could not save the time zone. The current setting is unchanged.',
   timeZoneSaved: 'Time zone saved.',
   timeZoneSave: 'Save time zone',
+  claudeVersionTitle: 'Claude client version',
+  claudeVersionDescription:
+    'Instance-wide settings for Claude subscription requests. New requests use the selected version; requests already running retain their original version.',
+  claudeVersionAutoHint:
+    'Check the official Claude Code npm package’s stable channel every 6 hours. Failed checks keep the last known version.',
   grokVersionTitle: 'Grok client version',
   grokVersionDescription:
     'Instance-wide settings for Grok subscription requests and quota queries. Version checks read official package metadata.',

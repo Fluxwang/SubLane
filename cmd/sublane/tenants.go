@@ -59,6 +59,7 @@ type tenantRegistry struct {
 	pricing           *pricing.Service
 	versions          *versions.Service
 	grokVersions      *versions.Service
+	claudeVersions    *versions.Service
 	timeZone          *timezone.Service
 	assets            fs.FS
 	dataDir           string
@@ -120,9 +121,10 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 	dataDir := ""
 	var codexVersions *versions.Service
 	var grokVersions *versions.Service
+	var claudeVersions *versions.Service
 	if id == 1 {
 		// The instance archive and version policy remain platform operations.
-		dataDir, codexVersions, grokVersions = r.dataDir, r.versions, r.grokVersions
+		dataDir, codexVersions, grokVersions, claudeVersions = r.dataDir, r.versions, r.grokVersions, r.claudeVersions
 	}
 	handler := server.New(server.Options{
 		DataDir: dataDir, Assets: r.assets, Version: r.version, StartedAt: r.started,
@@ -133,7 +135,7 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 		OAuth: oauth.New(accountService, r.provider), Gateway: forwarding, Pricing: r.pricing,
 		Groups: groups.NewForTenant(r.db, id), Tenants: r.tenants, TenantID: id,
 		PublicURL: r.publicURL, TrustedProxies: r.trustedProxies, LoginLimiter: r.loginLimiter, EnrollmentLimiter: r.enrollmentLimiter,
-		CodexVersions: codexVersions, GrokVersions: grokVersions, TimeZone: r.timeZone,
+		CodexVersions: codexVersions, GrokVersions: grokVersions, ClaudeVersions: claudeVersions, TimeZone: r.timeZone,
 	})
 	if r.runtimes == nil {
 		r.runtimes = make(map[int64]*tenantRuntime)

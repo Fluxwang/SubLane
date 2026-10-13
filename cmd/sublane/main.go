@@ -134,13 +134,21 @@ func run() error {
 		return err
 	}
 	defer grokVersions.Close()
+	claudeReleases := versions.NewClaudeReleases(nil)
+	defer claudeReleases.Close()
+	claudeVersions, err := versions.NewForProvider(ctx, db, versions.Claude, upstream.DefaultClaudeVersion, claudeReleases.Latest)
+	if err != nil {
+		return err
+	}
+	defer claudeVersions.Close()
 	timeZone, err := timezone.New(ctx, db)
 	if err != nil {
 		return fmt.Errorf("load instance time zone: %w", err)
 	}
 	codexVersions.Start()
 	grokVersions.Start()
-	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, GrokVersion: grokVersions.Current, MaxRequestBody: cfg.MaxRequestBody, InferenceHeaderTimeout: &cfg.InferenceHeaderTimeout})
+	claudeVersions.Start()
+	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, GrokVersion: grokVersions.Current, ClaudeVersion: claudeVersions.Current, MaxRequestBody: cfg.MaxRequestBody, InferenceHeaderTimeout: &cfg.InferenceHeaderTimeout})
 	defer provider.Close()
 	if err := provider.Start(ctx); err != nil {
 		return err
@@ -157,7 +165,7 @@ func run() error {
 	defer priceCatalog.Close()
 	registry := &tenantRegistry{ctx: ctx, db: db, vault: cipher, auth: authentication,
 		alerts:  notifications,
-		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, grokVersions: grokVersions, timeZone: timeZone,
+		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, grokVersions: grokVersions, claudeVersions: claudeVersions, timeZone: timeZone,
 		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL, trustedProxies: cfg.TrustedProxies,
 		version: version, started: time.Now(), gatewayPolicy: cfg.Gateway}
 	defer registry.Close()

@@ -21,6 +21,7 @@ func (c *Client) claudeUsage(ctx context.Context, credential accounts.Credential
 	}
 	request.Header.Set("Authorization", "Bearer "+credential.AccessToken)
 	request.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
+	request.Header.Set("User-Agent", claudeUserAgent(c.currentClaudeVersion()))
 	request.Header.Set("Accept", "application/json")
 	raw, err := c.subscriptionUsageResponse(request)
 	if err != nil {

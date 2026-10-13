@@ -51,6 +51,7 @@ type Client struct {
 	registry          *translator.Registry
 	version           func() string
 	grokVersion       func() string
+	claudeVersion     func() string
 	maxRequestBody    int64
 }
 
@@ -58,6 +59,7 @@ type Options struct {
 	Transport              http.RoundTripper
 	Version                func() string
 	GrokVersion            func() string
+	ClaudeVersion          func() string
 	MaxRequestBody         int64
 	InferenceHeaderTimeout *time.Duration
 }
@@ -121,6 +123,7 @@ func NewWithOptions(opts Options) *Client {
 		registry:       builtin.Registry(),
 		version:        opts.Version,
 		grokVersion:    opts.GrokVersion,
+		claudeVersion:  opts.ClaudeVersion,
 		maxRequestBody: requestBodyLimit(opts.MaxRequestBody),
 	}
 }
@@ -326,6 +329,20 @@ func (c *Client) execute(ctx context.Context, credential accounts.Credential, ra
 		return nil, ErrInput
 	}
 	body["model"], _ = json.Marshal(model)
+	if credential.Kind() == "claude" && adaptiveClaudeModel(model) {
+		// The intermediate Codex translator drops output limits; Claude's hard limit must survive that hop.
+		keys := []string{"max_output_tokens", "max_completion_tokens", "max_tokens"}
+		for _, key := range keys {
+			if value, ok := input[key]; ok && string(value) != "null" {
+				var limit int64
+				if json.Unmarshal(value, &limit) != nil || limit <= 0 {
+					return nil, ErrInput
+				}
+				body["max_output_tokens"] = value
+				break
+			}
+		}
+	}
 	body["stream"] = json.RawMessage("true")
 	body["store"] = json.RawMessage("false")
 	if _, ok := body["instructions"]; !ok {

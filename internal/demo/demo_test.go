@@ -87,7 +87,7 @@ func TestDemoLoginReadOnlyAndCleanup(t *testing.T) {
 			t.Fatalf("filter ignored: %+v", record)
 		}
 	}
-	for _, path := range []string{"/api/workspaces", "/api/system", "/api/accounts", "/api/accounts/runtime", "/api/groups", "/api/keys", "/api/members", "/api/requests", "/api/me/requests", "/api/usage?days=30", "/api/me/usage?days=7", "/api/me/limits", "/api/me/allocations", "/api/allocations", "/api/audit", "/api/proxies", "/api/settings/codex", "/api/settings/grok", "/api/settings/timezone", "/api/settings/backup"} {
+	for _, path := range []string{"/api/workspaces", "/api/system", "/api/accounts", "/api/accounts/runtime", "/api/groups", "/api/keys", "/api/members", "/api/requests", "/api/me/requests", "/api/usage?days=30", "/api/me/usage?days=7", "/api/me/limits", "/api/me/allocations", "/api/allocations", "/api/audit", "/api/proxies", "/api/settings/codex", "/api/settings/grok", "/api/settings/claude", "/api/settings/timezone", "/api/settings/backup"} {
 		t.Run(path, func(t *testing.T) {
 			got := call("GET", path, "", cookie)
 			if got.Code != 200 {
@@ -111,7 +111,7 @@ func TestDemoLoginReadOnlyAndCleanup(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/api/workspaces", "/api/auth/setup", "/api/auth/register", "/api/me/password", "/api/accounts/import", "/api/accounts/oauth", "/api/keys", "/api/keys/1/secret", "/api/settings/backup/export", "/api/settings/backup/verify", "/api/settings/codex/sync", "/api/settings/grok/sync", "/api/proxies/1/check", "/api/unknown"} {
+	for _, path := range []string{"/api/workspaces", "/api/auth/setup", "/api/auth/register", "/api/me/password", "/api/accounts/import", "/api/accounts/oauth", "/api/keys", "/api/keys/1/secret", "/api/settings/backup/export", "/api/settings/backup/verify", "/api/settings/codex/sync", "/api/settings/grok/sync", "/api/settings/claude/sync", "/api/proxies/1/check", "/api/unknown"} {
 		got := call("POST", path, `{}`, cookie)
 		if got.Code != 403 || !strings.Contains(got.Body.String(), "demo_read_only") {
 			t.Fatalf("mutation %s: %d %s", path, got.Code, got.Body.String())

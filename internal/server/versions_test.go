@@ -13,7 +13,7 @@ import (
 )
 
 func TestClientVersionSettingsRequireAdminAndAuditChanges(t *testing.T) {
-	for _, provider := range []versions.Provider{versions.Codex, versions.Grok} {
+	for _, provider := range []versions.Provider{versions.Codex, versions.Grok, versions.Claude} {
 		t.Run(string(provider), func(t *testing.T) {
 			ctx := context.Background()
 			connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "versions.db"))
@@ -33,8 +33,10 @@ func TestClientVersionSettingsRequireAdminAndAuditChanges(t *testing.T) {
 			options := Options{Auth: identity, Audit: audit.New(connection)}
 			if provider == versions.Codex {
 				options.CodexVersions = config
-			} else {
+			} else if provider == versions.Grok {
 				options.GrokVersions = config
+			} else {
+				options.ClaudeVersions = config
 			}
 			h := New(options)
 			origin := "http://example.test"

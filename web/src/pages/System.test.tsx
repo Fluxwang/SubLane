@@ -178,6 +178,7 @@ it.each([1, 2])(
 it.each([
   '/admin/settings/codex',
   '/admin/settings/grok',
+  '/admin/settings/claude',
   '/admin/settings/timezone',
   '/admin/settings/backup',
 ])(
@@ -223,4 +224,21 @@ it('opens Grok version settings with its own configuration endpoint', async () =
       .getByRole('link', { name: 'Grok client version' })
       .getAttribute('aria-current'),
   ).toBe('page')
+})
+
+it('opens Claude version settings with its own stable-channel configuration', async () => {
+  const fetch = session()
+  open('/admin/settings/claude')
+  expect(
+    await screen.findByRole('heading', { name: 'Claude client version' }),
+  ).toBeTruthy()
+  expect(await screen.findByLabelText('Manual version')).toBeTruthy()
+  expect(fetch.mock.calls.some(([url]) => url === '/api/settings/claude')).toBe(
+    true,
+  )
+  expect(
+    fetch.mock.calls.some(
+      ([url]) => url === '/api/settings/codex' || url === '/api/settings/grok',
+    ),
+  ).toBe(false)
 })

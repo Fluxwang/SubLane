@@ -50,6 +50,13 @@ export function GrokSettings() {
   ) : null
 }
 
+export function ClaudeSettings() {
+  const { data } = useQuery(authOptions())
+  return data?.user?.role === 'admin' && data.user.id === 1 ? (
+    <ClientVersion key={data.user.id} userID={data.user.id} provider="claude" />
+  ) : null
+}
+
 export function TimeZonePage() {
   const { data } = useQuery(authOptions())
   return data?.user?.role === 'admin' && data.user.id === 1 ? (

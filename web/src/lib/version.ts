@@ -22,7 +22,7 @@ const schema = z.object({
   sync_failed: z.boolean(),
 })
 export type VersionState = z.infer<typeof schema>
-export type VersionProvider = 'codex' | 'grok'
+export type VersionProvider = 'codex' | 'grok' | 'claude'
 export type VersionConfig = Pick<VersionState, 'manual_version' | 'auto_sync'>
 export function versionOptions(
   client: QueryClient,

@@ -64,6 +64,7 @@ func (c *Client) providerModels(ctx context.Context, credential accounts.Credent
 	req.Header.Set("Content-Type", "application/json")
 	if credential.Kind() == "claude" {
 		req.Header.Set("Anthropic-Version", "2023-06-01")
+		req.Header.Set("User-Agent", claudeUserAgent(c.currentClaudeVersion()))
 	}
 	executor, err := c.executor(credential.Kind())
 	if err != nil {

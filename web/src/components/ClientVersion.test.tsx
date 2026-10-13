@@ -25,7 +25,7 @@ const initial = {
 }
 const response = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status })
-function mount(provider: 'codex' | 'grok' = 'codex') {
+function mount(provider: 'codex' | 'grok' | 'claude' = 'codex') {
   const client = createQueryClient()
   client.setQueryData(authKey, authenticated)
   render(
@@ -35,7 +35,7 @@ function mount(provider: 'codex' | 'grok' = 'codex') {
   )
   return client
 }
-it.each(['codex', 'grok'] as const)(
+it.each(['codex', 'grok', 'claude'] as const)(
   'saves a %s manual version and keeps it selected after synchronization',
   async (provider) => {
     const pinned = {
