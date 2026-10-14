@@ -1089,6 +1089,12 @@ export const en = {
   keysLoadFailed: 'Could not load your API keys. Please try again.',
   noKeys: 'No API keys yet',
   noKeysDescription: 'Create a personal key for your client or application.',
+  showRevokedKeys: 'Show revoked ({{count}})',
+  keyRevokedNotice: "Key revoked. Use 'Show revoked' to view it.",
+  showRevoked: 'Show revoked',
+  noUsableKeys: 'No usable keys ({{count}} revoked)',
+  noUsableKeysDescription:
+    'Show your revoked keys to view them, or create a new key.',
   keyLastUsed: 'Last used',
   neverUsed: 'Never',
   revoked: 'Revoked',

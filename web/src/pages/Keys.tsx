@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, LoaderCircle } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
-import { keyOptions, keyState } from '@/lib/keys'
+import { keyOptions, keyState, type APIKey, type KeyPage } from '@/lib/keys'
 import { CreateKey } from '@/components/CreateKey'
 import { CatalogDialog } from '@/components/CatalogDialog'
 import { CopyKey } from '@/components/CopyKey'
@@ -28,8 +28,10 @@ function KeyManager({ userID }: { userID: number }) {
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
   const [cursors, setCursors] = useState([0])
+  const [showRevoked, setShowRevoked] = useState(false)
+  const [revokedNotice, setRevokedNotice] = useState(false)
   const query = useQuery(
-    keyOptions(client, userID, cursors[cursors.length - 1]),
+    keyOptions(client, userID, cursors[cursors.length - 1], showRevoked),
   )
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
@@ -46,10 +48,32 @@ function KeyManager({ userID }: { userID: number }) {
       client.invalidateQueries({ queryKey: ['system'] }),
     ])
   }
+  const onRevoked = async (revokedKey: APIKey) => {
+    const filter = { queryKey: ['keys', userID] }
+    // Cancel older reads before publishing the confirmed mutation, then refill filtered pages.
+    await client.cancelQueries(filter)
+    for (const [queryKey, page] of client.getQueriesData<KeyPage>(filter)) {
+      if (!page) continue
+      const included = queryKey[3] === true
+      client.setQueryData<KeyPage>(queryKey, {
+        ...page,
+        revoked_count: page.revoked_count + 1,
+        keys: included
+          ? page.keys.map((key) =>
+              key.id === revokedKey.id ? revokedKey : key,
+            )
+          : page.keys.filter((key) => key.id !== revokedKey.id),
+      })
+    }
+    setRevokedNotice(!showRevoked)
+    setCursors([0])
+    await invalidate()
+  }
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     timeZone,
     dateStyle: 'medium',
   })
+  const allRevoked = !showRevoked && (query.data?.revoked_count ?? 0) > 0
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -76,6 +100,37 @@ function KeyManager({ userID }: { userID: number }) {
       >
         {t('gatewayKeysNotice')}
       </p>
+      {revokedNotice && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t('keyRevokedNotice')}
+        </p>
+      )}
+      {query.data && (
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground aria-pressed:text-foreground"
+            aria-pressed={showRevoked}
+            disabled={
+              query.isFetching ||
+              (!showRevoked && query.data.revoked_count === 0)
+            }
+            onClick={() => {
+              setCursors([0])
+              setRevokedNotice(false)
+              setShowRevoked((value) => !value)
+            }}
+          >
+            {showRevoked ? (
+              <EyeOff aria-hidden="true" />
+            ) : (
+              <Eye aria-hidden="true" />
+            )}
+            {t('showRevokedKeys', { count: query.data.revoked_count })}
+          </Button>
+        </div>
+      )}
       {query.isPending ? (
         <p
           role="status"
@@ -107,10 +162,28 @@ function KeyManager({ userID }: { userID: number }) {
             className="mb-4 size-8 text-muted-foreground"
             aria-hidden="true"
           />
-          <h2 className="font-medium">{t('noKeys')}</h2>
+          <h2 className="font-medium">
+            {allRevoked
+              ? t('noUsableKeys', { count: query.data.revoked_count })
+              : t('noKeys')}
+          </h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            {t('noKeysDescription')}
+            {t(allRevoked ? 'noUsableKeysDescription' : 'noKeysDescription')}
           </p>
+          {allRevoked && (
+            <Button
+              className="mt-4"
+              variant="outline"
+              disabled={query.isFetching}
+              onClick={() => {
+                setCursors([0])
+                setRevokedNotice(false)
+                setShowRevoked(true)
+              }}
+            >
+              {t('showRevoked')}
+            </Button>
+          )}
         </section>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -208,7 +281,7 @@ function KeyManager({ userID }: { userID: number }) {
                       <EditKey value={key} onSaved={invalidate} />
                       <RevokeKey
                         value={key}
-                        onRevoked={invalidate}
+                        onRevoked={onRevoked}
                         focusAfterRevoke={() => heading.current?.focus()}
                       />
                     </div>

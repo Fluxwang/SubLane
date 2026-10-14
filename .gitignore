@@ -20,6 +20,14 @@ setup.key
 /docs/specs/
 /.impeccable/review/
 
+# Local agent planning and skill configuration.
+/.scratch/
+/CLAUDE.md
+/CONTEXT.md
+/docs/agents/issue-tracker.md
+/docs/agents/triage-labels.md
+/docs/agents/domain.md
+
 # Instance-local credential and API-key encryption key.
 credentials.key
 

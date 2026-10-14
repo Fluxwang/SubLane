@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
+	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/storage"
+	"github.com/murongg/SubLane/internal/tenants"
 )
 
 func TestPersonalKeyOwnershipAndGatewayBoundary(t *testing.T) {
@@ -182,5 +185,109 @@ func configureTestPool(t *testing.T, conn *sql.DB) {
 		if _, err := conn.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestPersonalKeyListFiltersBeforePaginationAndScopesRevokedCount(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "filtered-keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	identity, err := auth.New(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := identity.Setup(ctx, "synthetic-owner", "synthetic-password", "First workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := identity.CreateMember(ctx, "synthetic-member", "synthetic-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureTestPool(t, connection)
+	tenancy := tenants.New(connection)
+	second, err := tenancy.Create(ctx, member.ID, "Second workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := groups.NewForTenant(connection, second.ID).Save(ctx, 0, groups.Input{Name: "Second group", Enabled: true, AccountIDs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Historical fixtures exceed today's creation limit to exercise cursor pagination.
+	for id := int64(1); id <= 123; id++ {
+		userID, groupID := member.ID, int64(1)
+		var revoked any
+		if id%2 == 0 || id > 120 {
+			revoked = int64(1900000000)
+		}
+		if id == 121 {
+			userID = owner.User.ID
+		}
+		if id > 121 {
+			groupID = pool.ID
+		}
+		digest := sha256.Sum256([]byte(fmt.Sprintf("synthetic-hash-%d", id)))
+		if _, err := connection.ExecContext(ctx, `INSERT INTO api_keys(id,user_id,group_id,name,prefix,token_hash,created_at,revoked_at,enabled)
+			VALUES(?,?,?,?,?,?,1900000000,?,0)`, id, userID, groupID, fmt.Sprintf("Synthetic key %d", id), "sl_fixture", digest[:], revoked); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cipher, err := vault.Open(filepath.Join(t.TempDir(), "key"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewMulti(connection, identity, tenancy, "", func(id int64) http.Handler {
+		return New(Options{Auth: identity, Tenants: tenancy, TenantID: id, Keys: apikey.NewForTenant(connection, cipher, id)})
+	})
+	session, err := identity.Login(ctx, member.Username, "synthetic-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := &http.Cookie{Name: sessionCookie, Value: session.Token}
+	list := func(path string, workspace int64) (keys []apikey.Key, cursor, count int64) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "http://example.test"+path, nil)
+		r.AddCookie(cookie)
+		r.Header.Set(workspaceHeader, fmt.Sprint(workspace))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		var page struct {
+			Keys         []apikey.Key `json:"keys"`
+			NextCursor   int64        `json:"next_cursor"`
+			RevokedCount int64        `json:"revoked_count"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+			t.Fatalf("list failed: %d %s", w.Code, w.Body.String())
+		}
+		return page.Keys, page.NextCursor, page.RevokedCount
+	}
+	keys, cursor, count := list("/api/keys", 1)
+	if len(keys) != 50 || cursor != 21 || count != 60 {
+		t.Fatalf("default page: keys=%d cursor=%d revoked=%d", len(keys), cursor, count)
+	}
+	for _, key := range keys {
+		if key.RevokedAt != nil || key.Enabled {
+			t.Fatal("revoked keys must be hidden and paused keys must remain visible")
+		}
+	}
+	keys, cursor, count = list("/api/keys?cursor=21", 1)
+	if len(keys) != 10 || keys[0].ID != 19 || keys[9].ID != 1 || cursor != 0 || count != 60 {
+		t.Fatalf("filtered last page: keys=%d cursor=%d revoked=%d", len(keys), cursor, count)
+	}
+	keys, cursor, count = list("/api/keys?revoked=include", 1)
+	if len(keys) != 50 || keys[0].ID != 120 || keys[0].RevokedAt == nil || cursor != 71 || count != 60 {
+		t.Fatalf("included page: keys=%d cursor=%d revoked=%d", len(keys), cursor, count)
+	}
+	keys, cursor, count = list("/api/keys", second.ID)
+	if len(keys) != 0 || cursor != 0 || count != 2 {
+		t.Fatalf("second workspace: keys=%d cursor=%d revoked=%d", len(keys), cursor, count)
+	}
+	keys, _, count = list("/api/keys?revoked=include", second.ID)
+	if len(keys) != 2 || count != 2 {
+		t.Fatal("second workspace revoked keys missing")
 	}
 }

@@ -20,7 +20,7 @@ export function RevokeKey({
   focusAfterRevoke,
 }: {
   value: APIKey
-  onRevoked: () => Promise<void>
+  onRevoked: (key: APIKey) => Promise<void>
   focusAfterRevoke: () => void
 }) {
   const { t } = useTranslation()
@@ -28,10 +28,10 @@ export function RevokeKey({
   const completed = useRef(false)
   const mutation = useMutation({
     mutationFn: () => revokeKey(value.id),
-    onSuccess: () => {
+    onSuccess: (key) => {
       completed.current = true
       setOpen(false)
-      return onRevoked()
+      return onRevoked(key)
     },
   })
   return (
