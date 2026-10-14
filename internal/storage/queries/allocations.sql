@@ -85,3 +85,13 @@ DELETE FROM allocation_entries WHERE rowid IN (
 );
 -- name: AccountHasAllocation :one
 SELECT EXISTS(SELECT 1 FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id WHERE ga.account_id=?);
+-- name: CountActiveAllocationEntries :one
+SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND state='active';
+-- name: UnbindSchemeKeys :exec
+DELETE FROM allocation_keys WHERE scheme_id=?;
+-- name: DeleteAllocationEntries :exec
+DELETE FROM allocation_entries WHERE scheme_id=?;
+-- name: DeleteAllocationRevisions :exec
+DELETE FROM allocation_revisions WHERE scheme_id=?;
+-- name: DeleteAllocationScheme :exec
+DELETE FROM allocation_schemes WHERE id=?;

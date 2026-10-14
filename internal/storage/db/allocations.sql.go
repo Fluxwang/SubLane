@@ -209,6 +209,17 @@ func (q *Queries) CanUseAllocation(ctx context.Context, arg CanUseAllocationPara
 	return exists, err
 }
 
+const countActiveAllocationEntries = `-- name: CountActiveAllocationEntries :one
+SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND state='active'
+`
+
+func (q *Queries) CountActiveAllocationEntries(ctx context.Context, schemeID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAllocationEntries, schemeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAllocationScheme = `-- name: CreateAllocationScheme :execlastid
 INSERT INTO allocation_schemes(name,group_id,enabled,created_at) VALUES(?,?,?,?)
 `
@@ -252,6 +263,33 @@ func (q *Queries) CurrentAllocationRevision(ctx context.Context, arg CurrentAllo
 		&i.Config,
 	)
 	return i, err
+}
+
+const deleteAllocationEntries = `-- name: DeleteAllocationEntries :exec
+DELETE FROM allocation_entries WHERE scheme_id=?
+`
+
+func (q *Queries) DeleteAllocationEntries(ctx context.Context, schemeID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAllocationEntries, schemeID)
+	return err
+}
+
+const deleteAllocationRevisions = `-- name: DeleteAllocationRevisions :exec
+DELETE FROM allocation_revisions WHERE scheme_id=?
+`
+
+func (q *Queries) DeleteAllocationRevisions(ctx context.Context, schemeID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAllocationRevisions, schemeID)
+	return err
+}
+
+const deleteAllocationScheme = `-- name: DeleteAllocationScheme :exec
+DELETE FROM allocation_schemes WHERE id=?
+`
+
+func (q *Queries) DeleteAllocationScheme(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAllocationScheme, id)
+	return err
 }
 
 const deleteNextAllocationRevisions = `-- name: DeleteNextAllocationRevisions :exec
@@ -690,6 +728,15 @@ func (q *Queries) SaveAllocationRevision(ctx context.Context, arg SaveAllocation
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+const unbindSchemeKeys = `-- name: UnbindSchemeKeys :exec
+DELETE FROM allocation_keys WHERE scheme_id=?
+`
+
+func (q *Queries) UnbindSchemeKeys(ctx context.Context, schemeID int64) error {
+	_, err := q.db.ExecContext(ctx, unbindSchemeKeys, schemeID)
+	return err
 }
 
 const updateAllocationScheme = `-- name: UpdateAllocationScheme :exec

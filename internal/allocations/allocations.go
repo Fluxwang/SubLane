@@ -33,6 +33,8 @@ var (
 	ErrUnpriced              = errors.New("allocation_model_unpriced")
 	ErrUnknownWindowOverride = errors.New("allocation_unknown_window_override")
 	ErrSettlement            = errors.New("invalid_allocation_settlement")
+	ErrEnabled               = errors.New("allocation_enabled")
+	ErrInUse                 = errors.New("allocation_in_use")
 )
 
 type Share struct {
@@ -696,6 +698,43 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 		return err
 	}
 	if err = audit.Record(ctx, q, "allocation.save", "allocation", audit.ID(id)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteScheme removes a disabled scheme with its allowance records and revisions.
+// Bound keys are unbound rather than revoked, so they keep working as ordinary pool keys;
+// request history and usage summaries live in separate tables and are retained.
+func (s *Service) DeleteScheme(ctx context.Context, id int64) error {
+	tx, err := s.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	q := db.New(tx)
+	row, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: s.tenantID})
+	if err != nil {
+		return ErrNotFound
+	}
+	if row.Enabled != 0 {
+		return ErrEnabled
+	}
+	// In-flight requests settle into their entry after completion; deleting it would lose that charge.
+	active, err := q.CountActiveAllocationEntries(ctx, id)
+	if err != nil {
+		return err
+	}
+	if active > 0 {
+		return ErrInUse
+	}
+	// Child rows go first because SQLite enforces the scheme foreign keys.
+	for _, remove := range []func(context.Context, int64) error{q.UnbindSchemeKeys, q.DeleteAllocationEntries, q.DeleteAllocationRevisions, q.DeleteAllocationScheme} {
+		if err = remove(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err = audit.Record(ctx, q, "allocation.delete", "allocation", audit.ID(id)); err != nil {
 		return err
 	}
 	return tx.Commit()

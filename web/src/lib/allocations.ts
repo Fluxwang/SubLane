@@ -197,6 +197,8 @@ export function allocationErrorKey(error: Error) {
       return 'allocationSettlementConflict'
     if (error.code === 'allocation_model_unpriced') return 'allocationUnpriced'
     if (error.code === 'allocation_pending') return 'allocationPending'
+    if (error.code === 'allocation_in_use') return 'allocationInUse'
+    if (error.code === 'allocation_enabled') return 'allocationDeleteEnabled'
   }
   return 'allocationFailed'
 }
@@ -206,6 +208,10 @@ export function setSchemeEnabled(id: number, enabled: boolean) {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   })
+}
+
+export function deleteScheme(id: number) {
+  return request(`/api/allocations/${id}`, z.undefined(), { method: 'DELETE' })
 }
 
 export function availableAllocationPools<

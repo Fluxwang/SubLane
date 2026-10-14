@@ -220,6 +220,14 @@ export const zh: Record<keyof typeof en, string> = {
   workspaceListFailed: '无法加载工作空间。',
   workspaceSave: '保存工作空间',
   allocationPause: '暂停用量分配',
+  allocationDelete: '删除',
+  allocationDeleteNamed: '删除 {{name}}',
+  allocationDeleteTitle: '删除用量分配',
+  allocationDeleteDescription:
+    '删除“{{name}}”及其额度记录。绑定此方案的密钥会转为普通资源组密钥继续可用，不再受额度限制。请求历史和用量统计会保留。',
+  allocationDeleteConfirm: '删除方案',
+  allocationInUse: '此方案仍有进行中的请求，请稍后再试。',
+  allocationDeleteEnabled: '请先暂停此方案再删除。',
   allocationResume: '启用用量分配',
   allocationAccountLocked:
     '该账号已用于用量分配，无法删除。如需停止使用，请停用账号。',

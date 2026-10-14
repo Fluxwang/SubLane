@@ -1669,3 +1669,58 @@ func TestManagedAccountDeletionExplainsPoolLock(t *testing.T) {
 		t.Fatal("missing actionable lock error", err)
 	}
 }
+
+func TestDeleteSchemeRequiresDisabledAndReleasesPoolAndKeys(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	in := SchemeInput{Name: "Synthetic", GroupID: 2, Enabled: true, Config: Config{Mode: "ratio", RatioUnit: "tokens", Total: 1_000_000, Period: "month", Members: []Share{{UserID: user, Limit: 10000}}}}
+	scheme, err := s.SaveScheme(ctx, 0, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := conn.Exec("INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(?,2,'synthetic','sl_fake',randomblob(32),1)", user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := result.LastInsertId()
+	if _, err = conn.Exec("INSERT INTO allocation_keys(key_id,scheme_id) VALUES(?,?)", key, scheme.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteScheme(ctx, scheme.ID); !errors.Is(err, ErrEnabled) {
+		t.Fatal("enabled scheme was deleted", err)
+	}
+	if err = s.SetEnabled(ctx, scheme.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	rev, err := Current(ctx, db.New(conn), scheme.ID, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec("INSERT INTO allocation_entries(request_id,scheme_id,revision_id,user_id,account_id,model,mode,window_start,reset_at,started_at,state) VALUES('synthetic-active',?,?,?,?,'synthetic','tokens',0,1,1,'active')", scheme.ID, rev.ID, user, account); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteScheme(ctx, scheme.ID); !errors.Is(err, ErrInUse) {
+		t.Fatal("scheme with an in-flight request was deleted", err)
+	}
+	if _, err = conn.Exec("UPDATE allocation_entries SET state='pending'"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteScheme(ctx, scheme.ID); err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	// Former scheme keys become ordinary pool keys instead of being stranded.
+	if id, err := KeyScheme(ctx, q, key, user, 2, time.Now().Unix()); err != nil || id != 0 {
+		t.Fatal("bound key stayed unusable after deletion", id, err)
+	}
+	var revoked int64
+	if err = conn.QueryRow("SELECT COALESCE(revoked_at,0) FROM api_keys WHERE id=?", key).Scan(&revoked); err != nil || revoked != 0 {
+		t.Fatal("bound key was revoked", revoked, err)
+	}
+	if err = s.DeleteScheme(ctx, scheme.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("deleted scheme still exists", err)
+	}
+	if _, err = s.SaveScheme(ctx, 0, in); err != nil {
+		t.Fatal("pool could not receive a new scheme", err)
+	}
+}

@@ -241,6 +241,15 @@ export const en = {
   workspaceListFailed: 'Could not load workspaces.',
   workspaceSave: 'Save workspace',
   allocationPause: 'Pause resource allowance',
+  allocationDelete: 'Delete',
+  allocationDeleteNamed: 'Delete {{name}}',
+  allocationDeleteTitle: 'Delete resource allowance',
+  allocationDeleteDescription:
+    'Delete “{{name}}” and its allowance records. Keys bound to this allowance keep working as ordinary pool keys without allowance limits. Request history and usage summaries are kept.',
+  allocationDeleteConfirm: 'Delete allowance',
+  allocationInUse:
+    'Requests are still running on this allowance. Try again after they finish.',
+  allocationDeleteEnabled: 'Pause this allowance before deleting it.',
   allocationResume: 'Enable resource allowance',
   allocationAccountLocked:
     'This account is reserved by a resource allowance and cannot be deleted. Disable it to stop routing requests.',
