@@ -22,7 +22,7 @@ func TestAvailabilityUsesLocalAdmissionWithoutRoutingOrInference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model"}, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model"}, nil, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	value, err := s.Availability(ctx, 1, 1, "synthetic-model")
@@ -92,7 +92,7 @@ func TestAvailabilityReportsModelLimitsAndCurrentBusyState(t *testing.T) {
 	s, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
 	id := ids["codex"]
 	catalog, _ := s.accounts.Catalog(ctx, id)
-	if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, nil, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.loadRuntime(ctx); err != nil {

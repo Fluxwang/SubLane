@@ -204,7 +204,7 @@ func TestCatalogShutdownCancelsRefreshAndExpiredSnapshotsCannotRoute(t *testing.
 		return nil, r.Context().Err()
 	}))
 	catalog, _ := s.accounts.Catalog(ctx, ids["codex"])
-	if err := s.accounts.SaveCatalog(ctx, ids["codex"], catalog.Revision, []string{"synthetic-model"}, time.Now().Add(-25*time.Hour).Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, ids["codex"], catalog.Revision, []string{"synthetic-model"}, nil, time.Now().Add(-25*time.Hour).Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := groups.New(s.db).Save(ctx, 1, groups.Input{Name: "Default", Enabled: true, AccountIDs: []string{ids["codex"]}}); err != nil {
@@ -335,5 +335,64 @@ func TestVersionChangeDiscardsAnInFlightCatalog(t *testing.T) {
 	current, err := s.accounts.Catalog(ctx, ids["codex"])
 	if err != nil || current.Source != "codex:v1:0.300.0" {
 		t.Fatal(current, err)
+	}
+}
+
+func TestCatalogRoutesHiddenModelsWithoutListingThem(t *testing.T) {
+	ctx := context.Background()
+	catalog := `{"models":[{"slug":"synthetic-visible","visibility":"list"},{"slug":"synthetic-internal","visibility":"hide"}]}`
+	var routed atomic.Int32
+	s, ids := discoveryGateway(t, transportFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(catalog))}, nil
+		}
+		routed.Add(1)
+		return syntheticStream(), nil
+	}))
+	pool, err := groups.New(s.db).Save(ctx, 0, groups.Input{Name: "Hidden", Enabled: true, AccountIDs: []string{ids["codex"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := s.Models(ctx, 1, pool.ID)
+	if err != nil || len(models) != 1 || models[0].ID != "synthetic-visible" {
+		t.Fatal("hidden model was listed publicly", models, err)
+	}
+	snapshot, err := s.AccountCatalog(ctx, ids["codex"], false)
+	if err != nil || len(snapshot.HiddenModels) != 1 || snapshot.HiddenModels[0] != "synthetic-internal" {
+		t.Fatal("administrator catalog omitted hidden model", snapshot, err)
+	}
+	response, err := s.Open(ctx, 1, pool.ID, []byte(`{"model":"synthetic-internal","input":"synthetic"}`), nil, Responses)
+	if err != nil {
+		t.Fatal("hidden model could not route", err)
+	}
+	response.Body.Close()
+	if routed.Load() != 1 {
+		t.Fatal("hidden model request did not reach upstream")
+	}
+	if _, err := groups.New(s.db).Save(ctx, pool.ID, groups.Input{Name: pool.Name, Enabled: true, AccountIDs: []string{ids["codex"]}, ModelPolicy: &groups.ModelPolicy{Restricted: true, Models: []string{"synthetic-visible"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Open(ctx, 1, pool.ID, []byte(`{"model":"synthetic-internal","input":"synthetic"}`), nil, Responses); err == nil {
+		t.Fatal("hidden model bypassed the pool allowlist")
+	}
+}
+
+func TestCatalogIgnoresHiddenModelsWithoutVisibleModels(t *testing.T) {
+	ctx := context.Background()
+	s, ids := discoveryGateway(t, transportFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			// Obsolete clients can receive only hidden models; they do not describe current capabilities.
+			body := `{"models":[{"slug":"synthetic-internal","visibility":"hide"}]}`
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+		t.Error("unsupported model reached upstream")
+		return syntheticStream(), nil
+	}))
+	pool, err := groups.New(s.db).Save(ctx, 0, groups.Input{Name: "Obsolete", Enabled: true, AccountIDs: []string{ids["codex"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Open(ctx, 1, pool.ID, []byte(`{"model":"synthetic-internal","input":"synthetic"}`), nil, Responses); !errors.Is(err, ErrModelUnavailable) {
+		t.Fatal("hidden-only catalog granted support", err)
 	}
 }

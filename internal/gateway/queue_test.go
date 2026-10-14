@@ -68,7 +68,7 @@ func TestAccountQueueWaitsForStreamClosureAndPreservesAffinity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := s.accounts.SaveCatalog(ctx, backup.ID, 0, []string{"synthetic-model"}, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
+				if err := s.accounts.SaveCatalog(ctx, backup.ID, 0, []string{"synthetic-model"}, nil, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
 					t.Fatal(err)
 				}
 				configureTestPool(t, s.db)

@@ -584,6 +584,9 @@ export const en = {
   catalogModels: 'Models',
   catalogFor: 'Models for {{name}}',
   catalogAvailableModels: 'Available models',
+  catalogHiddenModels: 'Hidden models',
+  catalogHiddenHint:
+    'Not listed to clients, but requests for these models can route to this account.',
   catalogAccountDescription:
     'Models discovered from this account. This catalog describes reported support, not remaining quota or a successful generation test.',
   catalogGroupDescription:
@@ -818,6 +821,8 @@ export const en = {
     'Completed {{completed}} · Incomplete {{incomplete}} · Failed {{errors}} · Canceled {{canceled}} · Rejected {{rejected}}',
   usagePartialTokens:
     'Some calls did not report token usage; totals include reported values only.',
+  usageTokensShowExact: '{{value}}, show exact token counts',
+  usageTokensShowCompact: '{{value}}, show abbreviated token counts',
   usageReportedOnly: 'Reported values only',
   statisticsUnknown: 'Unavailable',
   usageOtherModels: 'Other models',

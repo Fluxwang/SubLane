@@ -36,7 +36,7 @@ func TestCatalogPersistsAndRejectsObsoleteAuthorization(t *testing.T) {
 		t.Fatal("new account must be unknown", initial, err)
 	}
 	at := time.Now().Unix()
-	if err := s.SaveCatalog(ctx, a.ID, initial.Revision, []string{"synthetic-z", "synthetic-a", "synthetic-z"}, at, "synthetic:v1"); err != nil {
+	if err := s.SaveCatalog(ctx, a.ID, initial.Revision, []string{"synthetic-z", "synthetic-a", "synthetic-z"}, nil, at, "synthetic:v1"); err != nil {
 		t.Fatal(err)
 	}
 	connection.Close()
@@ -57,10 +57,10 @@ func TestCatalogPersistsAndRejectsObsoleteAuthorization(t *testing.T) {
 	if err != nil || current.UpdatedAt != 0 || current.Revision == saved.Revision {
 		t.Fatal("reauthorization retained old capabilities", current, err)
 	}
-	if err := s.SaveCatalog(ctx, a.ID, saved.Revision, saved.Models, at+1, "synthetic:v1"); !errors.Is(err, ErrCatalogChanged) {
+	if err := s.SaveCatalog(ctx, a.ID, saved.Revision, saved.Models, nil, at+1, "synthetic:v1"); !errors.Is(err, ErrCatalogChanged) {
 		t.Fatal("obsolete fetch published", err)
 	}
-	if err := s.SaveCatalog(ctx, a.ID, current.Revision, []string{}, at, "synthetic:v1"); err != nil {
+	if err := s.SaveCatalog(ctx, a.ID, current.Revision, []string{}, nil, at, "synthetic:v1"); err != nil {
 		t.Fatal(err)
 	}
 	empty, err := s.Catalog(ctx, a.ID)
@@ -73,7 +73,7 @@ func TestCatalogPersistsAndRejectsObsoleteAuthorization(t *testing.T) {
 	if _, err := s.SetEnabled(ctx, a.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveCatalog(ctx, a.ID, current.Revision, saved.Models, at, "synthetic:v1"); !errors.Is(err, ErrCatalogChanged) {
+	if err := s.SaveCatalog(ctx, a.ID, current.Revision, saved.Models, nil, at, "synthetic:v1"); !errors.Is(err, ErrCatalogChanged) {
 		t.Fatal("disable/re-enable allowed an old fetch", err)
 	}
 	if err := s.Delete(ctx, a.ID); err != nil {
@@ -104,12 +104,23 @@ func TestCatalogRejectsInvalidModelsWithoutReplacingSnapshot(t *testing.T) {
 	}
 	catalog, _ := s.Catalog(ctx, a.ID)
 	for _, models := range [][]string{{"bad\nmodel"}, {""}, make([]string, 513)} {
-		if err := s.SaveCatalog(ctx, a.ID, catalog.Revision, models, time.Now().Unix(), "synthetic:v1"); !errors.Is(err, ErrInput) {
+		if err := s.SaveCatalog(ctx, a.ID, catalog.Revision, models, nil, time.Now().Unix(), "synthetic:v1"); !errors.Is(err, ErrInput) {
 			t.Fatal("invalid catalog accepted", err)
 		}
 	}
 	catalog, err = s.Catalog(ctx, a.ID)
 	if err != nil || catalog.UpdatedAt != 0 {
 		t.Fatal("invalid catalog published", err)
+	}
+}
+
+func TestCatalogDecodesLegacySnapshotsWithoutHiddenModels(t *testing.T) {
+	value, err := DecodeCatalog([]byte(`{"models":["synthetic-visible"],"updated_at":1}`), 1)
+	if err != nil || value.HiddenModels == nil || len(value.HiddenModels) != 0 || !value.Contains("synthetic-visible") {
+		t.Fatal("legacy catalog snapshot changed meaning", value, err)
+	}
+	value, err = DecodeCatalog([]byte(`{"models":["synthetic-visible"],"hidden_models":["synthetic-visible","synthetic-internal"],"updated_at":1}`), 1)
+	if err != nil || len(value.HiddenModels) != 1 || !value.Contains("synthetic-internal") {
+		t.Fatal("hidden catalog entries were not normalized", value, err)
 	}
 }

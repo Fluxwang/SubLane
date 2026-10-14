@@ -537,6 +537,9 @@ export const zh: Record<keyof typeof en, string> = {
   catalogModels: '模型',
   catalogFor: '{{name}} 的模型',
   catalogAvailableModels: '可用模型',
+  catalogHiddenModels: '隐藏模型',
+  catalogHiddenHint:
+    '不会出现在客户端的模型列表中，但对这些模型的请求可以路由到此账号。',
   catalogAccountDescription:
     '从此账号获取的模型目录，仅表示上游报告的支持范围，不代表剩余额度或生成验证结果。',
   catalogGroupDescription:
@@ -746,6 +749,8 @@ export const zh: Record<keyof typeof en, string> = {
   usageOutcomes:
     '完成 {{completed}} · 未完成 {{incomplete}} · 失败 {{errors}} · 取消 {{canceled}} · 拒绝 {{rejected}}',
   usagePartialTokens: '部分调用未报告 Token 用量，汇总仅包含已报告的数据。',
+  usageTokensShowExact: '{{value}}，显示完整 Token 数',
+  usageTokensShowCompact: '{{value}}，显示缩写 Token 数',
   usageReportedOnly: '仅已报告的用量',
   statisticsUnknown: '暂无信息',
   usageOtherModels: '其他模型',

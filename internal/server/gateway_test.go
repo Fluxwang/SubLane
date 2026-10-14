@@ -89,7 +89,7 @@ func newConfiguredForwardFixture(t *testing.T, provider string, handler http.Han
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		if err := service.SaveCatalog(ctx, row.ID, 0, []string{"synthetic-model"}, time.Now().Unix(), upstream.CatalogSource(provider)); err != nil {
+		if err := service.SaveCatalog(ctx, row.ID, 0, []string{"synthetic-model"}, nil, time.Now().Unix(), upstream.CatalogSource(provider)); err != nil {
 			t.Fatal(err)
 		}
 	}

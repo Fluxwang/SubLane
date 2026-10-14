@@ -8,6 +8,7 @@ export type CatalogTarget =
   | { kind: 'group' | 'key'; id: number }
 const snapshotSchema = z.object({
   models: z.array(z.string().min(1).max(128)).max(512),
+  hidden_models: z.array(z.string().min(1).max(128)).max(512).default([]),
   updated_at: z.number().int().nonnegative(),
   server_time: z.number().int(),
   known: z.boolean(),
@@ -56,6 +57,7 @@ async function readCatalog(
   const value = await request(catalogPath(target), groupSchema, { signal })
   return {
     models: value.models.map((model) => model.id),
+    hidden_models: [],
     updated_at: 0,
     server_time: value.server_time,
     known: value.known_accounts > 0 || value.unknown_accounts === 0,

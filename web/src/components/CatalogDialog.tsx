@@ -96,9 +96,10 @@ function CatalogContent({
     query.isFetching || refresh.isPending || Boolean(data?.refreshing)
   const failed =
     query.isError || refresh.isError || Boolean(data?.refresh_failed)
-  const models = (data?.models ?? []).filter((model) =>
-    model.toLowerCase().includes(filter.toLowerCase()),
-  )
+  const matches = (model: string) =>
+    model.toLowerCase().includes(filter.toLowerCase())
+  const models = (data?.models ?? []).filter(matches)
+  const hiddenModels = (data?.hidden_models ?? []).filter(matches)
   return (
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
       <DialogHeader>
@@ -207,7 +208,30 @@ function CatalogContent({
                   </li>
                 ))}
               </ul>
-              {!models.length && (
+              {hiddenModels.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium">
+                    {t('catalogHiddenModels')}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('catalogHiddenHint')}
+                  </p>
+                  <ul
+                    className="max-h-40 overflow-y-auto divide-y divide-border"
+                    aria-label={t('catalogHiddenModels')}
+                  >
+                    {hiddenModels.slice(0, 200).map((model) => (
+                      <li
+                        key={model}
+                        className="break-all py-2.5 font-mono text-xs text-muted-foreground"
+                      >
+                        {model}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!models.length && !hiddenModels.length && (
                 <p className="text-sm text-muted-foreground">
                   {t('catalogNoMatch')}
                 </p>
