@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 
+	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
@@ -71,6 +73,25 @@ func KeyScheme(ctx context.Context, q *db.Queries, key, user, group, now int64) 
 	}
 	_, err = Authorize(ctx, q, id, user, group, now)
 	return id, err
+}
+
+// accountRate charges nothing for an unpriced model the account's upstream marks hidden.
+// Hidden models are client-internal (for example Codex auto review) and have no public price;
+// unpriced visible models are still rejected so a missing price never silently becomes free.
+func accountRate(ctx context.Context, q *db.Queries, rev Revision, account, model string) (Rate, error) {
+	rate, err := rateFor(rev, model)
+	if !errors.Is(err, ErrUnpriced) {
+		return rate, err
+	}
+	row, e := q.GetAccountCatalog(ctx, account)
+	if e != nil {
+		return rate, err
+	}
+	catalog, e := accounts.DecodeCatalog(row.ModelsSnapshot, row.ModelsRevision)
+	if e != nil || !slices.Contains(catalog.HiddenModels, model) {
+		return rate, err
+	}
+	return Rate{Model: model}, nil
 }
 func rateFor(rev Revision, model string) (Rate, error) {
 	for _, r := range rev.Config.Rates {
@@ -152,7 +173,7 @@ func Check(ctx context.Context, q *db.Queries, scheme, user, group int64, accoun
 		return rev, err
 	}
 	if entryMode(rev.Config) == "amount" {
-		if _, err = rateFor(rev, model); err != nil {
+		if _, err = accountRate(ctx, q, rev, account, model); err != nil {
 			return rev, err
 		}
 	}
@@ -237,7 +258,7 @@ func Finish(ctx context.Context, q *db.Queries, id string, c Completion, now int
 		if err != nil {
 			return err
 		}
-		rate, err := rateFor(rev, e.Model)
+		rate, err := accountRate(ctx, q, rev, e.AccountID, e.Model)
 		if err != nil {
 			return err
 		}
