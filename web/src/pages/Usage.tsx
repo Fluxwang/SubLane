@@ -52,6 +52,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
   const [days, setDays] = useState(7)
   const [metric, setMetric] = useState<UsageMetric>('requests')
   const [showDetails, setShowDetails] = useState(false)
+  const [exactTokens, setExactTokens] = useState(false)
   const [view, setView] = useState<'days' | 'models' | 'groups' | 'members'>(
     'days',
   )
@@ -90,8 +91,42 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
       : row.name === '[other models]'
         ? t('usageOtherModels')
         : row.name || t('statisticsUnknown')
-  const tokens = (count: number, reported: number) =>
-    reported > 0 ? number.format(count) : '—'
+  const exactNumber = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')
+  // Token units stay K/M/B in every interface language.
+  const compactNumber = new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+  const tokenPair = (metrics: Statistic | NonNullable<typeof totals>) => {
+    const format = (formatter: Intl.NumberFormat) =>
+      [
+        [metrics.input_tokens, metrics.input_reported],
+        [metrics.output_tokens, metrics.output_reported],
+      ]
+        .map(([count, reported]) =>
+          reported > 0 ? formatter.format(count) : '—',
+        )
+        .join(' / ')
+    const exact = format(exactNumber)
+    if (metrics.input_reported <= 0 && metrics.output_reported <= 0)
+      return exact
+    const shown = exactTokens ? exact : format(compactNumber)
+    return (
+      <button
+        type="button"
+        aria-pressed={exactTokens}
+        aria-label={t(
+          exactTokens ? 'usageTokensShowCompact' : 'usageTokensShowExact',
+          { value: shown },
+        )}
+        title={exactTokens ? undefined : exact}
+        onClick={() => setExactTokens((value) => !value)}
+        className="cursor-pointer rounded-sm tabular-nums underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {shown}
+      </button>
+    )
+  }
   const percentage = (completed: number, requests: number) =>
     requests ? number.format((completed / requests) * 100) + '%' : '—'
   const duration = (sum: number, requests: number) =>
@@ -251,10 +286,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                   },
                   {
                     label: 'requestTokens',
-                    value:
-                      tokens(totals.input_tokens, totals.input_reported) +
-                      ' / ' +
-                      tokens(totals.output_tokens, totals.output_reported),
+                    value: tokenPair(totals),
                   },
                 ] as const
               ).map((item) => (
@@ -372,8 +404,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                               {duration(row.duration_ms, row.requests)}
                             </td>
                             <td className="whitespace-nowrap px-4 py-4 tabular-nums">
-                              {tokens(row.input_tokens, row.input_reported)} /{' '}
-                              {tokens(row.output_tokens, row.output_reported)}
+                              {tokenPair(row)}
                               {row.requests > 0 &&
                                 (row.input_reported < row.requests ||
                                   row.output_reported < row.requests) && (

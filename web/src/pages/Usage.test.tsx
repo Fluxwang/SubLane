@@ -261,3 +261,60 @@ it('redirects the former personal usage URL to the combined home page', async ()
     await screen.findByRole('heading', { name: 'Your usage' }),
   ).toBeTruthy()
 })
+
+it('abbreviates token totals and toggles exact values page-wide', async () => {
+  const large = {
+    ...metrics,
+    input_tokens: 22732006,
+    output_tokens: 97308,
+    input_reported: 2,
+    output_reported: 2,
+  }
+  const fetch = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(new Response(JSON.stringify(authenticated)))
+    if (url === '/api/workspaces')
+      return Promise.resolve(new Response(JSON.stringify(workspaces)))
+    if (url === '/api/connection')
+      return Promise.resolve(new Response(JSON.stringify({ status: 'ready' })))
+    if (url.startsWith('/api/usage?'))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...summary,
+            totals: large,
+            days: [{ id: '1900000000', name: '2030-03-17', ...large }],
+          }),
+        ),
+      )
+    return Promise.reject(new Error('Unexpected request ' + url))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(
+    <App
+      router={createAppRouter(
+        createMemoryHistory({ initialEntries: ['/admin/usage'] }),
+      )}
+    />,
+  )
+  await user.click(await screen.findByRole('button', { name: 'View details' }))
+  const compact = await screen.findAllByRole('button', {
+    name: '22.7M / 97.3K, show exact token counts',
+  })
+  expect(compact).toHaveLength(2)
+  expect(compact[0].getAttribute('aria-pressed')).toBe('false')
+  expect(compact[0].getAttribute('title')).toBe('22,732,006 / 97,308')
+  await user.click(compact[1])
+  const exact = screen.getAllByRole('button', {
+    name: '22,732,006 / 97,308, show abbreviated token counts',
+  })
+  expect(exact).toHaveLength(2)
+  expect(exact[0].getAttribute('aria-pressed')).toBe('true')
+  await user.click(exact[0])
+  expect(
+    screen.getAllByRole('button', {
+      name: '22.7M / 97.3K, show exact token counts',
+    }),
+  ).toHaveLength(2)
+})
