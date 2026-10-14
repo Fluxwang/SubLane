@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -161,5 +162,50 @@ func TestStatisticsRejectsInvalidCoverageSettings(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestStatisticsEstimateCostFromCurrentPricesAndReportUnpricedTokens(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	// Rates are micro-USD per million tokens.
+	s.pricing = pricing.NewStatic(map[string]pricing.Price{"synthetic-priced": {Input: 2_000_000, Cached: 500_000, Output: 8_000_000}})
+	value := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for _, record := range []db.RecordRequestParams{
+		{Model: "synthetic-priced", InputTokens: value(1_000_000), OutputTokens: value(100_000), CachedTokens: value(400_000)},
+		{Model: "synthetic-unpriced", InputTokens: value(300), OutputTokens: value(50), CachedTokens: value(0)},
+		// Without a cache split, differing rates make the price of this input unknown.
+		// Daily aggregates merge a model's requests, so this case uses the previous day.
+		{Model: "synthetic-priced", InputTokens: value(1_000), OutputTokens: value(0), StartedAt: s.now().Unix() - 86400},
+	} {
+		if record.StartedAt == 0 {
+			record.StartedAt = s.now().Unix()
+		}
+		record.UserID, record.GroupID, record.Provider, record.Outcome = 1, 1, "codex", "success"
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.Statistics(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Cost.EstimatedMicroUSD != 2_200_000 || stats.Cost.UnpricedTokens != 1_350 {
+		t.Fatal("inaccurate cost estimate", stats.Cost)
+	}
+	if len(stats.Cost.Days) != len(stats.Days) || stats.Cost.Days[6].ID != stats.Days[6].ID || stats.Cost.Days[6].EstimatedMicroUSD != 2_200_000 || stats.Cost.Days[5].EstimatedMicroUSD != 0 {
+		t.Fatal("daily costs misaligned", stats.Cost.Days)
+	}
+	s.pricing = nil
+	if stats, err = s.Statistics(ctx, 7); err != nil || stats.Cost.EstimatedMicroUSD != 0 || stats.Cost.UnpricedTokens != 1_101_350 {
+		t.Fatal("missing price catalog fabricated cost", stats.Cost, err)
 	}
 }

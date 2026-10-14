@@ -226,38 +226,42 @@ func (c *Client) Models(ctx context.Context, credential accounts.Credential) ([]
 
 type Discovery struct {
 	Models []Model
+	// Hidden models are routable for this account but omitted from public catalogs.
+	Hidden []string
 	Source string
 }
 
 func (c *Client) Discover(ctx context.Context, credential accounts.Credential) (Discovery, error) {
 	ctx = credentialContext(ctx, credential)
 	version := c.codexVersion()
-	models, err := c.models(ctx, credential, version)
-	return Discovery{Models: models, Source: catalogSource(credential.Kind(), version)}, err
+	discovery, err := c.models(ctx, credential, version)
+	discovery.Source = catalogSource(credential.Kind(), version)
+	return discovery, err
 }
 
-func (c *Client) models(ctx context.Context, credential accounts.Credential, version string) ([]Model, error) {
+func (c *Client) models(ctx context.Context, credential accounts.Credential, version string) (Discovery, error) {
 	if credential.Kind() != "codex" {
-		return c.providerModels(ctx, credential)
+		models, err := c.providerModels(ctx, credential)
+		return Discovery{Models: models}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/models?client_version="+version, nil)
 	if err != nil {
-		return nil, ErrInput
+		return Discovery{}, ErrInput
 	}
 	upstreamHeaders(request, credential, nil, false, version)
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, ErrUpstream
+		return Discovery{}, ErrUpstream
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return nil, &UpstreamError{Status: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
+		return Discovery{}, &UpstreamError{Status: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
 	}
 	raw, err := readBounded(response.Body, 2<<20)
 	if err != nil {
-		return nil, ErrResponse
+		return Discovery{}, ErrResponse
 	}
 	var catalog struct {
 		Models []struct {
@@ -266,15 +270,24 @@ func (c *Client) models(ctx context.Context, credential accounts.Credential, ver
 		} `json:"models"`
 	}
 	if json.Unmarshal(raw, &catalog) != nil || catalog.Models == nil || len(catalog.Models) > 512 {
-		return nil, ErrResponse
+		return Discovery{}, ErrResponse
 	}
-	models := make([]Model, 0, len(catalog.Models))
+	result := Discovery{Models: make([]Model, 0, len(catalog.Models)), Hidden: []string{}}
 	for _, model := range catalog.Models {
-		if model.Slug != "" && len(model.Slug) <= 128 && model.Visibility != "hide" && model.Visibility != "hidden" {
-			models = append(models, Model{ID: model.Slug, Object: "model", OwnedBy: "openai"})
+		if model.Slug == "" || len(model.Slug) > 128 {
+			continue
+		}
+		if model.Visibility == "hide" || model.Visibility == "hidden" {
+			result.Hidden = append(result.Hidden, model.Slug)
+		} else {
+			result.Models = append(result.Models, Model{ID: model.Slug, Object: "model", OwnedBy: "openai"})
 		}
 	}
-	return models, nil
+	// Obsolete clients can receive only hidden models, which do not describe current capabilities.
+	if len(result.Models) == 0 {
+		result.Hidden = []string{}
+	}
+	return result, nil
 }
 
 type UpstreamError struct {

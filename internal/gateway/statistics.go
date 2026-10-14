@@ -2,11 +2,13 @@ package gateway
 
 import (
 	"context"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -40,6 +42,18 @@ type Statistics struct {
 	Models        []Statistic `json:"models"`
 	Groups        []Statistic `json:"groups"`
 	Activity      Activity    `json:"activity"`
+	Cost          CostSummary `json:"cost"`
+}
+
+// CostSummary is a current-catalog estimate; allowance debits use their saved revision prices.
+type CostSummary struct {
+	EstimatedMicroUSD int64     `json:"estimated_micro_usd"`
+	UnpricedTokens    int64     `json:"unpriced_tokens"`
+	Days              []DayCost `json:"days"`
+}
+type DayCost struct {
+	ID                string `json:"id"`
+	EstimatedMicroUSD int64  `json:"estimated_micro_usd"`
 }
 
 func (s *Service) Statistics(ctx context.Context, days int64) (Statistics, error) {
@@ -109,6 +123,9 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 		row.Name = time.Unix(day, 0).UTC().Format("2006-01-02")
 		page.Days = append(page.Days, row)
 	}
+	if page.Cost, err = s.estimateCost(ctx, q, userID, page.Days); err != nil {
+		return page, err
+	}
 	if page.Models, err = list("model", 20); err != nil {
 		return page, err
 	}
@@ -121,6 +138,56 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 		}
 	}
 	return page, tx.Commit()
+}
+
+func (s *Service) estimateCost(ctx context.Context, q *db.Queries, userID int64, days []Statistic) (CostSummary, error) {
+	summary := CostSummary{Days: make([]DayCost, 0, len(days))}
+	if len(days) == 0 {
+		return summary, nil
+	}
+	from, err := strconv.ParseInt(days[0].ID, 10, 64)
+	if err != nil {
+		return summary, err
+	}
+	rows, err := q.ListStatisticsCostBasis(ctx, db.ListStatisticsCostBasisParams{TenantID: s.tenantID, FromDay: from, ToDay: from + int64(len(days))*86400, UserID: userID})
+	if err != nil {
+		return summary, err
+	}
+	// Sum exact products per day before rounding; long periods can exceed per-request cost bounds.
+	sums := make(map[int64]*big.Int, len(days))
+	for _, row := range rows {
+		price, ok := pricing.Price{}, false
+		if s.pricing != nil {
+			price, ok = s.pricing.Lookup(row.Model)
+		}
+		// Overflow labels and partially reported cache splits cannot be priced when rates differ.
+		if !ok || (row.CachedReported < row.InputReported && price.Input != price.Cached) || row.CachedTokens > row.InputTokens {
+			summary.UnpricedTokens += row.InputTokens + row.OutputTokens
+			continue
+		}
+		sum := sums[row.Day]
+		if sum == nil {
+			sum = new(big.Int)
+			sums[row.Day] = sum
+		}
+		for _, v := range [][2]int64{{row.InputTokens - row.CachedTokens, price.Input}, {row.CachedTokens, price.Cached}, {row.OutputTokens, price.Output}} {
+			sum.Add(sum, new(big.Int).Mul(big.NewInt(v[0]), big.NewInt(v[1])))
+		}
+	}
+	for _, day := range days {
+		cost := DayCost{ID: day.ID}
+		id, err := strconv.ParseInt(day.ID, 10, 64)
+		if err != nil {
+			return summary, err
+		}
+		if sum := sums[id]; sum != nil {
+			rounded := new(big.Int).Add(sum, big.NewInt(999_999))
+			cost.EstimatedMicroUSD = rounded.Div(rounded, big.NewInt(1_000_000)).Int64()
+		}
+		summary.EstimatedMicroUSD += cost.EstimatedMicroUSD
+		summary.Days = append(summary.Days, cost)
+	}
+	return summary, nil
 }
 
 func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestParams) error {

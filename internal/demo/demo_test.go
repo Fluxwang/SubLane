@@ -46,7 +46,7 @@ func TestDemoLoginReadOnlyAndCleanup(t *testing.T) {
 	}
 	cookie := login.Result().Cookies()[0]
 	prices := call("GET", "/api/pricing", "", cookie)
-	if prices.Code != 200 || !strings.Contains(prices.Body.String(), `"prices":[]`) {
+	if prices.Code != 200 || strings.Count(prices.Body.String(), `"source":"demo"`) != 2 || strings.Count(prices.Body.String(), `"source":`) != 2 {
 		t.Fatalf("offline price catalog: %d %s", prices.Code, prices.Body.String())
 	}
 	alertSettings := call("GET", "/api/alerts", "", cookie)

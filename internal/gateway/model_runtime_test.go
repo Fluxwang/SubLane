@@ -116,7 +116,7 @@ func modelLimitFixture(t *testing.T, failure string) (*Service, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.accounts.SaveCatalog(context.Background(), id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, s.now().Unix(), upstream.CatalogSource("antigravity")); err != nil {
+	if err := s.accounts.SaveCatalog(context.Background(), id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, nil, s.now().Unix(), upstream.CatalogSource("antigravity")); err != nil {
 		t.Fatal(err)
 	}
 	return s, id

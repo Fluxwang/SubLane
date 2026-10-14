@@ -114,7 +114,7 @@ func (s *Service) modelAvailability(rows []availabilityAccount, policy groups.Mo
 			value.MaxConcurrency = runtime.MaxConcurrency
 		}
 		known := catalogUsable(row.catalog, s.catalog.now())
-		supported := known && catalogContains(row.catalog.Models, model)
+		supported := known && catalogRoutes(row.catalog, model)
 		if !supported && row.catalog.Source != s.provider.CatalogSource(account.Provider) {
 			known = false
 		}

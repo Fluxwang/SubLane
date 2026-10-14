@@ -192,3 +192,28 @@ it('ignores a late refresh failure after the active identity changes', async () 
   await waitFor(() => expect(client.isMutating()).toBe(0))
   expect(client.getQueryData<typeof authenticated>(authKey)?.user?.id).toBe(42)
 })
+it('lists hidden account models separately from public models', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...snapshot,
+          hidden_models: ['synthetic-internal'],
+        }),
+      ),
+    ),
+  )
+  const user = userEvent.setup()
+  mount()
+  await user.click(
+    screen.getByRole('button', { name: 'Models for Synthetic subscription' }),
+  )
+  const hidden = await screen.findByRole('list', { name: 'Hidden models' })
+  expect(hidden.textContent).toContain('synthetic-internal')
+  expect(
+    screen.getByRole('list', { name: 'Available models' }).textContent,
+  ).not.toContain('synthetic-internal')
+  await user.type(screen.getByLabelText('Search models'), 'basic')
+  expect(screen.queryByRole('list', { name: 'Hidden models' })).toBeNull()
+})

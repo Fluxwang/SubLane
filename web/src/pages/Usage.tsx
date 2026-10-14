@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -9,12 +9,15 @@ import {
   ownLimitOptions,
   type UsageScope,
 } from '@/lib/statistics'
+import type { en } from '@/locales/en'
 import { Button } from '@/components/ui/Button'
 import { UsageChart } from '@/components/UsageChart'
 import { PersonalAllocations } from '@/components/PersonalAllocations'
 import { ActivityMap } from '@/components/ActivityMap'
 import {
   metricLabels,
+  metricPartial,
+  metricValue,
   type UsageMetric,
   type Statistic,
 } from '@/lib/statistics'
@@ -50,8 +53,9 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
   const timeZone = useTimeZone()
   const client = useQueryClient()
   const [days, setDays] = useState(7)
-  const [metric, setMetric] = useState<UsageMetric>('requests')
+  const [metric, setMetric] = useState<UsageMetric>('tokens')
   const [showDetails, setShowDetails] = useState(false)
+  const [exactTokens, setExactTokens] = useState(false)
   const [view, setView] = useState<'days' | 'models' | 'groups' | 'members'>(
     'days',
   )
@@ -90,8 +94,75 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
       : row.name === '[other models]'
         ? t('usageOtherModels')
         : row.name || t('statisticsUnknown')
-  const tokens = (count: number, reported: number) =>
-    reported > 0 ? number.format(count) : '—'
+  const exactNumber = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')
+  // Token units stay K/M/B in every interface language.
+  const compactNumber = new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+  // Unreported counts are null; any reported count makes the value switchable.
+  const tokenToggle = (counts: (number | null)[]) => {
+    const format = (formatter: Intl.NumberFormat) =>
+      counts
+        .map((count) => (count === null ? '—' : formatter.format(count)))
+        .join(' / ')
+    const exact = format(exactNumber)
+    if (counts.every((count) => count === null)) return exact
+    const shown = exactTokens ? exact : format(compactNumber)
+    return (
+      <button
+        type="button"
+        aria-pressed={exactTokens}
+        aria-label={t(
+          exactTokens ? 'usageTokensShowCompact' : 'usageTokensShowExact',
+          { value: shown },
+        )}
+        title={exactTokens ? undefined : exact}
+        onClick={() => setExactTokens((value) => !value)}
+        className="cursor-pointer rounded-sm tabular-nums underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {shown}
+      </button>
+    )
+  }
+  const tokenPair = (metrics: Statistic | NonNullable<typeof totals>) =>
+    tokenToggle([
+      metrics.input_reported > 0 ? metrics.input_tokens : null,
+      metrics.output_reported > 0 ? metrics.output_tokens : null,
+    ])
+  // Like token units, USD amounts keep the same form in every interface language.
+  const usd = new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency: 'USD',
+  })
+  const usdAxis = new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  })
+  const cost = (microUSD: number) =>
+    microUSD > 0 && microUSD < 10_000
+      ? t('usageCostBelow', { value: usd.format(0.01) })
+      : usd.format(microUSD / 1_000_000)
+  const dailyCost = new Map(
+    query.data?.cost.days.map((day) => [day.id, day.estimated_micro_usd]),
+  )
+  const trend = (query.data?.days ?? [])
+    .filter((row) => Number(row.id) + 86400 > query.data!.tracking_since)
+    .map((row) =>
+      metric === 'cost'
+        ? {
+            id: row.id,
+            amount: dailyCost.get(row.id) ?? 0,
+            partial: false,
+          }
+        : {
+            id: row.id,
+            amount: metricValue(row, metric),
+            partial: metricPartial(row, metric),
+          },
+    )
   const percentage = (completed: number, requests: number) =>
     requests ? number.format((completed / requests) * 100) + '%' : '—'
   const duration = (sum: number, requests: number) =>
@@ -184,26 +255,6 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" aria-label={t('usageMetric')}>
-              {t(metricLabels[metric])}
-              <ChevronDown aria-hidden="true" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              value={metric}
-              onValueChange={(value) => setMetric(value as UsageMetric)}
-            >
-              {(Object.keys(metricLabels) as UsageMetric[]).map((value) => (
-                <DropdownMenuRadioItem key={value} value={value}>
-                  {t(metricLabels[value])}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
         <Button
           variant="ghost"
           className="ml-auto"
@@ -234,40 +285,69 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                 zone: timeZone,
               })}
             </p>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-6 border-y border-border py-6 lg:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               {(
                 [
                   {
-                    label: 'usageRequests',
+                    label: 'usageTotalCost',
+                    value: cost(query.data.cost.estimated_micro_usd),
+                  },
+                  {
+                    label: 'usageTotalRequests',
                     value: number.format(totals.requests),
                   },
                   {
-                    label: 'usageCompletionRate',
-                    value: percentage(totals.completed, totals.requests),
+                    label: 'usageTokenConsumption',
+                    value: tokenToggle([
+                      totals.input_reported > 0 || totals.output_reported > 0
+                        ? totals.input_tokens + totals.output_tokens
+                        : null,
+                    ]),
+                    detail:
+                      totals.input_reported > 0 || totals.output_reported > 0
+                        ? t('usageTokenSplit', {
+                            input: compactNumber.format(totals.input_tokens),
+                            output: compactNumber.format(totals.output_tokens),
+                          })
+                        : undefined,
                   },
                   {
-                    label: 'usageAverageDuration',
-                    value: duration(totals.duration_ms, totals.requests),
-                  },
-                  {
-                    label: 'requestTokens',
+                    label: 'usageCacheHitRate',
+                    // Only calls that reported a cache split contribute cached tokens.
                     value:
-                      tokens(totals.input_tokens, totals.input_reported) +
-                      ' / ' +
-                      tokens(totals.output_tokens, totals.output_reported),
+                      totals.cached_reported > 0 && totals.input_tokens > 0
+                        ? number.format(
+                            (totals.cached_tokens / totals.input_tokens) * 100,
+                          ) + '%'
+                        : '—',
                   },
-                ] as const
+                ] as {
+                  label: keyof typeof en
+                  value: ReactNode
+                  detail?: string
+                }[]
               ).map((item) => (
-                <div key={item.label} className="min-w-0">
+                <div
+                  key={item.label}
+                  className="min-w-0 rounded-xl border border-border bg-card p-4 sm:p-5"
+                >
                   <dt className="text-sm text-muted-foreground">
                     {t(item.label)}
                   </dt>
-                  <dd className="mt-2 break-words text-2xl font-semibold tracking-tight tabular-nums">
+                  <dd className="mt-2 break-words text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">
                     {item.value}
                   </dd>
+                  {item.detail && (
+                    <dd className="mt-1 text-xs text-muted-foreground tabular-nums">
+                      {item.detail}
+                    </dd>
+                  )}
                 </div>
               ))}
             </dl>
+            {query.data.cost.unpriced_tokens > 0 && (
+              <p className="text-sm text-warning">{t('usageCostUnpriced')}</p>
+            )}
             {totals.requests > 0 && (
               <>
                 <p className="text-sm text-muted-foreground">
@@ -298,7 +378,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                 <ActivityMap
                   key={days}
                   activity={query.data.activity}
-                  metric={metric}
+                  metric={metric === 'cost' ? 'tokens' : metric}
                 />
               </>
             ) : (
@@ -307,18 +387,51 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                   aria-label={t('usageChart')}
                   className="rounded-xl border border-border bg-card p-4 sm:p-6"
                 >
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-medium">
+                      {t('usageTrend')} · {period(days)}
+                    </h3>
+                    <div
+                      role="group"
+                      aria-label={t('usageMetric')}
+                      className="flex rounded-lg bg-muted p-1"
+                    >
+                      {(Object.keys(metricLabels) as UsageMetric[]).map(
+                        (value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={metric === value}
+                            onClick={() => setMetric(value)}
+                            className="rounded-md px-3 py-1 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-card aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm"
+                          >
+                            {t(metricLabels[value])}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
                   <UsageChart
-                    key={view + days + metric}
-                    rows={rows.map((row) => ({ ...row, name: rowName(row) }))}
-                    metric={metric}
-                    daily={view === 'days'}
-                    label={t(labels[view]) + ' · ' + t(metricLabels[metric])}
+                    key={days + metric}
+                    points={trend}
+                    label={t('usageTrend') + ' · ' + t(metricLabels[metric])}
+                    metricLabel={t(metricLabels[metric])}
+                    format={
+                      metric === 'cost'
+                        ? cost
+                        : (value) => exactNumber.format(value)
+                    }
+                    axis={
+                      metric === 'cost'
+                        ? (value) => usdAxis.format(value / 1_000_000)
+                        : (value) => compactNumber.format(value)
+                    }
                   />
                 </section>
                 <ActivityMap
                   key={days}
                   activity={query.data.activity}
-                  metric={metric}
+                  metric={metric === 'cost' ? 'tokens' : metric}
                 />
                 {showDetails && (
                   <div
@@ -372,8 +485,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                               {duration(row.duration_ms, row.requests)}
                             </td>
                             <td className="whitespace-nowrap px-4 py-4 tabular-nums">
-                              {tokens(row.input_tokens, row.input_reported)} /{' '}
-                              {tokens(row.output_tokens, row.output_reported)}
+                              {tokenPair(row)}
                               {row.requests > 0 &&
                                 (row.input_reported < row.requests ||
                                   row.output_reported < row.requests) && (

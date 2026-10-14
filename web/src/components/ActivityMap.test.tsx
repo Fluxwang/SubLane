@@ -31,7 +31,7 @@ it('distinguishes observed zero activity from hours without collected data', () 
 
 it('supports keyboard navigation and preserves unknown or partial token values', () => {
   const { rerender } = render(
-    <ActivityMap activity={activity} metric="input_tokens" />,
+    <ActivityMap activity={activity} metric="tokens" />,
   )
   const zero = screen.getByRole('gridcell', { name: /Mon 01:00–02:00/ })
   zero.focus()

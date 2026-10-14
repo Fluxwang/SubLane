@@ -33,7 +33,7 @@ func allocationError(w http.ResponseWriter, err error) {
 		status, code = 404, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):
 		status, code = 403, err.Error()
-	case errors.Is(err, allocations.ErrPoolConflict), errors.Is(err, allocations.ErrSettlement), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrUnpriced):
+	case errors.Is(err, allocations.ErrPoolConflict), errors.Is(err, allocations.ErrSettlement), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrUnpriced), errors.Is(err, allocations.ErrEnabled), errors.Is(err, allocations.ErrInUse):
 		status, code = 409, err.Error()
 	}
 	writeJSON(w, status, map[string]string{"error": code})
@@ -52,6 +52,7 @@ func (h *allocationHTTP) register(r chi.Router) {
 	})
 	r.Post("/{id}/settle", h.settle)
 	r.Post("/{id}/enabled", h.enabled)
+	r.Delete("/{id}", h.remove)
 }
 func (h *allocationHTTP) list(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w, r) {
@@ -159,6 +160,21 @@ func (h *allocationHTTP) enabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = h.gateway.Allocations().SetEnabled(r.Context(), id, *in.Enabled); err != nil {
+		allocationError(w, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+func (h *allocationHTTP) remove(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w, r) {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil || id <= 0 {
+		allocationError(w, allocations.ErrInput)
+		return
+	}
+	if err = h.gateway.Allocations().DeleteScheme(r.Context(), id); err != nil {
 		allocationError(w, err)
 		return
 	}

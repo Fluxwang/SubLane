@@ -35,7 +35,7 @@ func seed(ctx context.Context, connection *sql.DB, identity *auth.Service, accou
 		if err != nil {
 			return err
 		}
-		if err := accountService.SaveCatalog(ctx, account.ID, 0, []string{"demo-codex", "demo-codex-mini"}, now.Unix(), upstream.CatalogSource("codex")); err != nil {
+		if err := accountService.SaveCatalog(ctx, account.ID, 0, []string{"demo-codex", "demo-codex-mini"}, nil, now.Unix(), upstream.CatalogSource("codex")); err != nil {
 			return err
 		}
 		accountIDs = append(accountIDs, account.ID)

@@ -95,7 +95,12 @@ func New(ctx context.Context, options Options) (_ *Instance, err error) {
 	// No SDK runtime, release poller, price fetcher, or real network transport is started.
 	provider := upstream.NewWithTransport(transport{})
 	instance.provider = provider
-	forwarding := gateway.New(ctx, connection, accountService, provider)
+	// Synthetic rates (micro-USD per million tokens) let demo usage show cost estimates.
+	prices := pricing.NewStatic(map[string]pricing.Price{
+		"demo-codex":      {Input: 1_250_000, Cached: 125_000, Output: 10_000_000, Source: "demo"},
+		"demo-codex-mini": {Input: 250_000, Cached: 25_000, Output: 2_000_000, Source: "demo"},
+	})
+	forwarding := gateway.New(ctx, connection, accountService, provider, prices)
 	forwarding.SetTimeZone(zone)
 	instance.gateway = forwarding
 	versionPolicy, err := versions.New(ctx, connection, upstream.DefaultCodexVersion, func(context.Context) (string, error) { return "", errors.New("demo_read_only") })
@@ -128,7 +133,7 @@ func New(ctx context.Context, options Options) (_ *Instance, err error) {
 		DataDir: directory, Assets: options.Assets, Version: options.Version, StartedAt: time.Now(),
 		Ping: connection.PingContext, Audit: audit.NewForTenant(connection, 1), Auth: identity,
 		Keys: keys, Accounts: accountService, Gateway: forwarding, Groups: poolService,
-		Pricing: pricing.NewStatic(nil),
+		Pricing: prices,
 		Tenants: tenancy, TenantID: 1, PublicURL: options.PublicURL, TrustedProxies: options.TrustedProxies,
 		CodexVersions: versionPolicy, GrokVersions: grokPolicy, ClaudeVersions: claudePolicy, TimeZone: zone,
 		// Expose configuration reads without starting the outbound notification worker.

@@ -49,7 +49,7 @@ func TestProtocolPreferenceHonorsAdmissionAndScope(t *testing.T) {
 			case "quota":
 				saveExhaustedQuota(t, s, ids["codex"])
 			case "model":
-				if err := s.accounts.SaveCatalog(ctx, ids["codex"], 0, []string{"other-model"}, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
+				if err := s.accounts.SaveCatalog(ctx, ids["codex"], 0, []string{"other-model"}, nil, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
 					t.Fatal(err)
 				}
 			case "group", "policy":
@@ -105,7 +105,7 @@ func TestProtocolPreferenceRotatesWithinTierWithoutOtherProtocolInterference(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.accounts.SaveCatalog(ctx, second.ID, 0, []string{"synthetic-model"}, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, second.ID, 0, []string{"synthetic-model"}, nil, s.now().Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec("INSERT INTO group_accounts(group_id,account_id) VALUES(1,?)", second.ID); err != nil {

@@ -68,3 +68,14 @@ CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
 FROM usage_daily s LEFT JOIN users u ON u.id=s.user_id JOIN account_groups g ON g.id=s.group_id
 WHERE g.tenant_id=sqlc.arg(tenant_id) AND s.day>=sqlc.arg(from_day) AND s.day<sqlc.arg(to_day) AND (s.user_id=sqlc.arg(user_id) OR sqlc.arg(user_id)=0)
 GROUP BY 1,2 ORDER BY requests DESC,bucket ASC LIMIT sqlc.arg(max_rows);
+
+-- name: ListStatisticsCostBasis :many
+SELECT s.day, s.model,
+CAST(COALESCE(SUM(s.input_tokens),0) AS INTEGER) AS input_tokens,
+CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
+CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
+CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+FROM usage_daily s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) AND s.day>=sqlc.arg(from_day) AND s.day<sqlc.arg(to_day) AND (s.user_id=sqlc.arg(user_id) OR sqlc.arg(user_id)=0)
+GROUP BY s.day, s.model;

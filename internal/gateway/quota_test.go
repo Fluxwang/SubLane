@@ -139,7 +139,7 @@ func TestSubscriptionQuotaSelectionPreservesAffinityAndModelScope(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, s.now().Unix(), upstream.CatalogSource(provider)); err != nil {
+			if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, nil, s.now().Unix(), upstream.CatalogSource(provider)); err != nil {
 				t.Fatal(err)
 			}
 			bound, _, err := s.selectAccount(ctx, 1, 1, "synthetic-conversation", provider, "synthetic-model", Responses)

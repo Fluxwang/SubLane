@@ -241,6 +241,15 @@ export const en = {
   workspaceListFailed: 'Could not load workspaces.',
   workspaceSave: 'Save workspace',
   allocationPause: 'Pause resource allowance',
+  allocationDelete: 'Delete',
+  allocationDeleteNamed: 'Delete {{name}}',
+  allocationDeleteTitle: 'Delete resource allowance',
+  allocationDeleteDescription:
+    'Delete “{{name}}” and its allowance records. Keys bound to this allowance keep working as ordinary pool keys without allowance limits. Request history and usage summaries are kept.',
+  allocationDeleteConfirm: 'Delete allowance',
+  allocationInUse:
+    'Requests are still running on this allowance. Try again after they finish.',
+  allocationDeleteEnabled: 'Pause this allowance before deleting it.',
   allocationResume: 'Enable resource allowance',
   allocationAccountLocked:
     'This account is reserved by a resource allowance and cannot be deleted. Disable it to stop routing requests.',
@@ -584,6 +593,9 @@ export const en = {
   catalogModels: 'Models',
   catalogFor: 'Models for {{name}}',
   catalogAvailableModels: 'Available models',
+  catalogHiddenModels: 'Hidden models',
+  catalogHiddenHint:
+    'Not listed to clients, but requests for these models can route to this account.',
   catalogAccountDescription:
     'Models discovered from this account. This catalog describes reported support, not remaining quota or a successful generation test.',
   catalogGroupDescription:
@@ -747,8 +759,6 @@ export const en = {
   activityLess: 'Less',
   activityMore: 'More',
   activityUnknown: 'Unknown',
-  usageInputTokens: 'Input tokens',
-  usageOutputTokens: 'Output tokens',
   usageMetric: 'Chart metric',
   usageChart: 'Usage chart',
   usageChartHint: 'Hover or tap to inspect a day.',
@@ -758,7 +768,6 @@ export const en = {
   usageNoTokenReports:
     'No values were reported for this metric in this period.',
   usageTokenNotReported: 'Not reported',
-  usageRankHint: 'The 20 most active entries, ordered by request count.',
   usageViewDetails: 'View details',
   usageHideDetails: 'Hide details',
   changePassword: 'Change password',
@@ -818,6 +827,19 @@ export const en = {
     'Completed {{completed}} · Incomplete {{incomplete}} · Failed {{errors}} · Canceled {{canceled}} · Rejected {{rejected}}',
   usagePartialTokens:
     'Some calls did not report token usage; totals include reported values only.',
+  usageTokensShowExact: '{{value}}, show exact token counts',
+  usageTokensShowCompact: '{{value}}, show abbreviated token counts',
+  usageTotalCost: 'Total cost',
+  usageTotalRequests: 'Total requests',
+  usageTokenConsumption: 'Tokens consumed',
+  usageCacheHitRate: 'Cache hit rate',
+  usageTokenSplit: 'In {{input}} · Out {{output}}',
+  usageTrend: 'Usage trend',
+  usageMetricTokens: 'Tokens',
+  usageMetricCost: 'Cost',
+  usageCostBelow: '< {{value}}',
+  usageCostUnpriced:
+    'Some models have no price; total cost covers priced usage only. Costs are estimated with current prices.',
   usageReportedOnly: 'Reported values only',
   statisticsUnknown: 'Unavailable',
   usageOtherModels: 'Other models',

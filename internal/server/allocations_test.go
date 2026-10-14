@@ -163,7 +163,7 @@ func TestSchemeKeysIsolateTeamsAcrossHTTPAndWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = f.accounts.SaveCatalog(ctx, second.ID, 0, []string{"synthetic-model"}, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err = f.accounts.SaveCatalog(ctx, second.ID, 0, []string{"synthetic-model"}, nil, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.groups.Save(ctx, 1, groups.Input{Name: "Default", Enabled: true, AccountIDs: []string{}}); err != nil {

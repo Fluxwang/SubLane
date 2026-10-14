@@ -212,7 +212,7 @@ func (s *Service) fetchCatalog(id string, e *catalogEntry, release func()) {
 		for _, model := range discovery.Models {
 			ids = append(ids, model.ID)
 		}
-		err = s.accounts.SaveCatalog(ctx, id, e.revision, ids, observedAt, discovery.Source)
+		err = s.accounts.SaveCatalog(ctx, id, e.revision, ids, discovery.Hidden, observedAt, discovery.Source)
 	}
 	release()
 	<-c.slots
@@ -396,13 +396,19 @@ func (s *Service) catalogSupport(ctx context.Context, q *db.Queries, id, model, 
 		return false, false, err
 	}
 	known := catalogUsable(value, s.catalog.now())
-	supported := known && catalogContains(value.Models, model)
+	supported := known && catalogRoutes(value, model)
 	// An obsolete catalog can retain known capabilities, but cannot prove a new model unsupported.
 	if !supported && value.Source != s.provider.CatalogSource(provider) {
 		return false, false, nil
 	}
 	return known, supported, nil
 }
+
+// Routing accepts hidden models; public listings use catalogContains on visible models only.
+func catalogRoutes(value accounts.Catalog, model string) bool {
+	return value.Contains(model) || value.Contains(upstream.CatalogModelID(model))
+}
+
 func catalogContains(models []string, model string) bool {
 	return slices.Contains(models, model) || slices.Contains(models, upstream.CatalogModelID(model))
 }

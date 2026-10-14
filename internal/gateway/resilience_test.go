@@ -28,7 +28,7 @@ func TestTransientFailuresAffectOnlyRequestedModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.accounts.SaveCatalog(ctx, ids["codex"], catalog.Revision, []string{"synthetic-model", "synthetic-other"}, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, ids["codex"], catalog.Revision, []string{"synthetic-model", "synthetic-other"}, nil, time.Now().Unix(), upstream.CatalogSource("codex")); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {

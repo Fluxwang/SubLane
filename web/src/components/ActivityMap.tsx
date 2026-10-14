@@ -6,14 +6,14 @@ import {
   metricPartial,
   type Activity,
   type ActivityCell,
-  type UsageMetric,
+  type ActivityMetric,
 } from '@/lib/statistics'
 
 import { heatmapTone } from '@/lib/heatmap'
 import { useTimeZone } from '@/lib/timezone'
 import { HeatmapLegend } from './HeatmapLegend'
 
-function amount(cell: ActivityCell, metric: UsageMetric) {
+function amount(cell: ActivityCell, metric: ActivityMetric) {
   return metricValue(cell, metric, cell.samples > 0)
 }
 
@@ -22,7 +22,7 @@ export function ActivityMap({
   metric,
 }: {
   activity: Activity
-  metric: UsageMetric
+  metric: ActivityMetric
 }) {
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()

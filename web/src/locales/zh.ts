@@ -220,6 +220,14 @@ export const zh: Record<keyof typeof en, string> = {
   workspaceListFailed: '无法加载工作空间。',
   workspaceSave: '保存工作空间',
   allocationPause: '暂停用量分配',
+  allocationDelete: '删除',
+  allocationDeleteNamed: '删除 {{name}}',
+  allocationDeleteTitle: '删除用量分配',
+  allocationDeleteDescription:
+    '删除“{{name}}”及其额度记录。绑定此方案的密钥会转为普通资源组密钥继续可用，不再受额度限制。请求历史和用量统计会保留。',
+  allocationDeleteConfirm: '删除方案',
+  allocationInUse: '此方案仍有进行中的请求，请稍后再试。',
+  allocationDeleteEnabled: '请先暂停此方案再删除。',
   allocationResume: '启用用量分配',
   allocationAccountLocked:
     '该账号已用于用量分配，无法删除。如需停止使用，请停用账号。',
@@ -537,6 +545,9 @@ export const zh: Record<keyof typeof en, string> = {
   catalogModels: '模型',
   catalogFor: '{{name}} 的模型',
   catalogAvailableModels: '可用模型',
+  catalogHiddenModels: '隐藏模型',
+  catalogHiddenHint:
+    '不会出现在客户端的模型列表中，但对这些模型的请求可以路由到此账号。',
   catalogAccountDescription:
     '从此账号获取的模型目录，仅表示上游报告的支持范围，不代表剩余额度或生成验证结果。',
   catalogGroupDescription:
@@ -684,8 +695,6 @@ export const zh: Record<keyof typeof en, string> = {
   activityLess: '少',
   activityMore: '多',
   activityUnknown: '暂无数据',
-  usageInputTokens: '输入 Token',
-  usageOutputTokens: '输出 Token',
   usageMetric: '图表指标',
   usageChart: '用量图表',
   usageChartHint: '悬停或轻触查看某天的数据。',
@@ -693,7 +702,6 @@ export const zh: Record<keyof typeof en, string> = {
   usageChartGaps: '未报告 Token 用量的日期显示为断点。',
   usageNoTokenReports: '该周期未报告当前指标的用量。',
   usageTokenNotReported: '未报告',
-  usageRankHint: '按请求数排序，展示最活跃的前 20 项。',
   usageViewDetails: '查看明细',
   usageHideDetails: '收起明细',
   changePassword: '修改密码',
@@ -746,6 +754,19 @@ export const zh: Record<keyof typeof en, string> = {
   usageOutcomes:
     '完成 {{completed}} · 未完成 {{incomplete}} · 失败 {{errors}} · 取消 {{canceled}} · 拒绝 {{rejected}}',
   usagePartialTokens: '部分调用未报告 Token 用量，汇总仅包含已报告的数据。',
+  usageTokensShowExact: '{{value}}，显示完整 Token 数',
+  usageTokensShowCompact: '{{value}}，显示缩写 Token 数',
+  usageTotalCost: '总成本',
+  usageTotalRequests: '总请求数',
+  usageTokenConsumption: 'Token 消耗',
+  usageCacheHitRate: '缓存命中率',
+  usageTokenSplit: '输入 {{input}} · 输出 {{output}}',
+  usageTrend: '使用趋势',
+  usageMetricTokens: 'Tokens',
+  usageMetricCost: '成本',
+  usageCostBelow: '< {{value}}',
+  usageCostUnpriced:
+    '部分模型没有价格，总成本仅包含已定价的用量。成本按当前价格估算。',
   usageReportedOnly: '仅已报告的用量',
   statisticsUnknown: '暂无信息',
   usageOtherModels: '其他模型',

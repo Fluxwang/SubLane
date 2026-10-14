@@ -20,7 +20,7 @@ func TestResourceRoutingPrioritiesFallbackAndAffinity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.accounts.SaveCatalog(ctx, channel.ID, 0, []string{"synthetic-model", "api-only"}, s.now().Unix(), upstream.CatalogSource("openai")); err != nil {
+	if err := s.accounts.SaveCatalog(ctx, channel.ID, 0, []string{"synthetic-model", "api-only"}, nil, s.now().Unix(), upstream.CatalogSource("openai")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.accounts.RecordUse(ctx, channel.ID, "synthetic-key", true); err != nil {

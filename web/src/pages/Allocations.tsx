@@ -12,6 +12,7 @@ import {
   allocationErrorKey,
   type Scheme,
 } from '@/lib/allocations'
+import { DeleteScheme } from '@/components/DeleteScheme'
 import { groupOptions, poolMembersOptions } from '@/lib/groups'
 import { SchemeForm } from '@/components/SchemeForm'
 import { AllocationPriceWarning } from '@/components/AllocationPriceWarning'
@@ -291,6 +292,10 @@ export function Allocations() {
                 >
                   {t('allocationEdit')}
                 </Button>
+                {/* Only paused schemes can be deleted; the server enforces the same rule. */}
+                {!s.enabled && (
+                  <DeleteScheme id={s.id} name={s.name} onDeleted={saved} />
+                )}
               </div>
             </section>
           ))}
