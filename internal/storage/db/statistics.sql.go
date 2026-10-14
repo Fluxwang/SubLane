@@ -211,6 +211,71 @@ func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) 
 	return items, nil
 }
 
+const listStatisticsCostBasis = `-- name: ListStatisticsCostBasis :many
+SELECT s.day, s.model,
+CAST(COALESCE(SUM(s.input_tokens),0) AS INTEGER) AS input_tokens,
+CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
+CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
+CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+FROM usage_daily s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=?1 AND s.day>=?2 AND s.day<?3 AND (s.user_id=?4 OR ?4=0)
+GROUP BY s.day, s.model
+`
+
+type ListStatisticsCostBasisParams struct {
+	TenantID int64
+	FromDay  int64
+	ToDay    int64
+	UserID   int64
+}
+
+type ListStatisticsCostBasisRow struct {
+	Day            int64
+	Model          string
+	InputTokens    int64
+	OutputTokens   int64
+	CachedTokens   int64
+	InputReported  int64
+	CachedReported int64
+}
+
+func (q *Queries) ListStatisticsCostBasis(ctx context.Context, arg ListStatisticsCostBasisParams) ([]ListStatisticsCostBasisRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStatisticsCostBasis,
+		arg.TenantID,
+		arg.FromDay,
+		arg.ToDay,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatisticsCostBasisRow{}
+	for rows.Next() {
+		var i ListStatisticsCostBasisRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.InputReported,
+			&i.CachedReported,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pruneStatistics = `-- name: PruneStatistics :execrows
 DELETE FROM usage_daily WHERE rowid IN (SELECT old.rowid FROM usage_daily old WHERE old.day<?1 LIMIT 500)
 `

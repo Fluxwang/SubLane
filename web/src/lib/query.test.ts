@@ -87,6 +87,7 @@ it('stops usage refetches under an obsolete identity', async () => {
     members: [],
     models: [],
     groups: [],
+    cost: { estimated_micro_usd: 0, unpriced_tokens: 0, days: [] },
   })
   const fetch = vi
     .fn()

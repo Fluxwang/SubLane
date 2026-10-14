@@ -1,41 +1,25 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { UsageChart } from './UsageChart'
-import type { Statistic } from '@/lib/statistics'
 
-const row: Statistic = {
-  id: '1900000000',
-  name: 'Synthetic day',
-  requests: 3,
-  completed: 3,
-  incomplete: 0,
-  errors: 0,
-  canceled: 0,
-  rejected: 0,
-  duration_ms: 0,
-  input_tokens: 20,
-  output_tokens: 5,
-  cached_tokens: 0,
-  input_reported: 1,
-  output_reported: 1,
-  cached_reported: 0,
-}
+const format = (value: number) => String(value)
 
 it('exposes daily values to the keyboard and leaves missing token reports unknown', () => {
   render(
     <UsageChart
-      rows={[
-        row,
-        { ...row, id: '1900086400', input_tokens: 0, input_reported: 0 },
+      points={[
+        { id: '1900000000', amount: 25, partial: false },
+        { id: '1900086400', amount: null, partial: true },
       ]}
-      metric="input_tokens"
-      daily
-      label="Daily · Input tokens"
+      label="Usage trend · Tokens"
+      metricLabel="Tokens"
+      format={format}
+      axis={format}
     />,
   )
-  const chart = screen.getByRole('img', { name: 'Daily · Input tokens' })
+  const chart = screen.getByRole('img', { name: 'Usage trend · Tokens' })
   fireEvent.keyDown(chart, { key: 'Home' })
-  expect(within(screen.getByRole('status')).getByText('20')).toBeTruthy()
+  expect(within(screen.getByRole('status')).getByText('25')).toBeTruthy()
   fireEvent.keyDown(chart, { key: 'ArrowRight' })
   expect(
     within(screen.getByRole('status')).getByText('Not reported'),
@@ -46,40 +30,18 @@ it('exposes daily values to the keyboard and leaves missing token reports unknow
 it('does not turn entirely missing usage into a zero-valued chart', () => {
   render(
     <UsageChart
-      rows={[
-        { ...row, input_tokens: 0, input_reported: 0 },
-        {
-          ...row,
-          id: '1900086400',
-          requests: 0,
-          input_tokens: 0,
-          input_reported: 0,
-        },
+      points={[
+        { id: '1900000000', amount: null, partial: true },
+        { id: '1900086400', amount: 0, partial: false },
       ]}
-      metric="input_tokens"
-      daily
-      label="Daily · Input tokens"
+      label="Usage trend · Tokens"
+      metricLabel="Tokens"
+      format={format}
+      axis={format}
     />,
   )
   expect(
     screen.getByText('No values were reported for this metric in this period.'),
   ).toBeTruthy()
   expect(screen.queryByRole('img')).toBeNull()
-})
-
-it('shows ranked model names and exact values without requiring a table', () => {
-  render(
-    <UsageChart
-      rows={[
-        { ...row, id: 'codex/synthetic-model', name: 'codex/synthetic-model' },
-      ]}
-      metric="requests"
-      daily={false}
-      label="Models · Requests"
-    />,
-  )
-  expect(screen.getByRole('list', { name: 'Models · Requests' })).toBeTruthy()
-  expect(screen.getByText('codex/synthetic-model')).toBeTruthy()
-  expect(screen.getByText('3')).toBeTruthy()
-  expect(screen.queryByRole('table')).toBeNull()
 })

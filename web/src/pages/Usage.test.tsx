@@ -39,6 +39,11 @@ const summary = {
     { id: 'codex/synthetic-model', name: 'codex/synthetic-model', ...metrics },
   ],
   groups: [],
+  cost: {
+    estimated_micro_usd: 0,
+    unpriced_tokens: 0,
+    days: [{ id: '1900000000', estimated_micro_usd: 0 }],
+  },
 }
 
 it.each([
@@ -99,7 +104,7 @@ it.each([
     await screen.findByText(
       'Some calls did not report token usage; totals include reported values only.',
     )
-    await screen.findByRole('img', { name: 'Daily · Requests' })
+    await screen.findByRole('img', { name: 'Usage trend · Tokens' })
     await screen.findByRole('region', { name: 'Activity by time' })
     expect(screen.getAllByRole('gridcell')).toHaveLength(168)
     if (path === '/')
@@ -132,6 +137,8 @@ it.each([
     )
     await user.click(screen.getByRole('button', { name: 'Breakdown' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Models' }))
+    await user.click(screen.getByRole('button', { name: 'View details' }))
+    expect(screen.getByRole('table', { name: 'Models' })).toBeTruthy()
     await screen.findByText('codex/synthetic-model')
     expect(
       screen.getByRole('region', { name: 'Activity by time' }),
@@ -193,7 +200,7 @@ it('shows personal usage beneath the administrator overview', async () => {
     await screen.findByRole('heading', { name: 'Your usage', level: 2 }),
   ).toBeTruthy()
   expect(
-    await screen.findByRole('img', { name: 'Daily · Requests' }),
+    await screen.findByRole('img', { name: 'Usage trend · Tokens' }),
   ).toBeTruthy()
   expect(screen.queryByRole('heading', { name: 'Service' })).toBeNull()
   expect(screen.getByRole('heading', { name: 'Gateway setup' })).toBeTruthy()
@@ -262,13 +269,15 @@ it('redirects the former personal usage URL to the combined home page', async ()
   ).toBeTruthy()
 })
 
-it('abbreviates token totals and toggles exact values page-wide', async () => {
+it('summarizes cost, requests, tokens, and cache hits and toggles exact token values page-wide', async () => {
   const large = {
     ...metrics,
     input_tokens: 22732006,
     output_tokens: 97308,
+    cached_tokens: 11366003,
     input_reported: 2,
     output_reported: 2,
+    cached_reported: 2,
   }
   const fetch = vi.fn().mockImplementation((url: string) => {
     if (url === '/api/auth/state')
@@ -284,6 +293,11 @@ it('abbreviates token totals and toggles exact values page-wide', async () => {
             ...summary,
             totals: large,
             days: [{ id: '1900000000', name: '2030-03-17', ...large }],
+            cost: {
+              estimated_micro_usd: 9_370_000,
+              unpriced_tokens: 120,
+              days: [{ id: '1900000000', estimated_micro_usd: 9_370_000 }],
+            },
           }),
         ),
       )
@@ -298,23 +312,41 @@ it('abbreviates token totals and toggles exact values page-wide', async () => {
       )}
     />,
   )
-  await user.click(await screen.findByRole('button', { name: 'View details' }))
-  const compact = await screen.findAllByRole('button', {
-    name: '22.7M / 97.3K, show exact token counts',
+  const total = await screen.findByRole('button', {
+    name: '22.8M, show exact token counts',
   })
-  expect(compact).toHaveLength(2)
-  expect(compact[0].getAttribute('aria-pressed')).toBe('false')
-  expect(compact[0].getAttribute('title')).toBe('22,732,006 / 97,308')
-  await user.click(compact[1])
-  const exact = screen.getAllByRole('button', {
-    name: '22,732,006 / 97,308, show abbreviated token counts',
-  })
-  expect(exact).toHaveLength(2)
-  expect(exact[0].getAttribute('aria-pressed')).toBe('true')
-  await user.click(exact[0])
+  const card = (label: string) =>
+    screen.getByText(label, { selector: 'dt' }).parentElement!
+  expect(card('Total cost').textContent).toContain('$9.37')
+  expect(card('Total requests').textContent).toContain('2')
+  expect(card('Tokens consumed').textContent).toContain('In 22.7M · Out 97.3K')
+  expect(card('Cache hit rate').textContent).toContain('50%')
   expect(
-    screen.getAllByRole('button', {
+    screen.getByText(/Some models have no price/, { selector: 'p' }),
+  ).toBeTruthy()
+  expect(total.getAttribute('aria-pressed')).toBe('false')
+  expect(total.getAttribute('title')).toBe('22,829,314')
+  await user.click(screen.getByRole('button', { name: 'View details' }))
+  await user.click(
+    screen.getByRole('button', {
       name: '22.7M / 97.3K, show exact token counts',
     }),
-  ).toHaveLength(2)
+  )
+  expect(
+    screen
+      .getByRole('button', {
+        name: '22,829,314, show abbreviated token counts',
+      })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  await user.click(
+    screen.getByRole('button', {
+      name: '22,732,006 / 97,308, show abbreviated token counts',
+    }),
+  )
+  expect(
+    screen.getByRole('button', { name: '22.8M, show exact token counts' }),
+  ).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Cost', pressed: false }))
+  expect(screen.getByRole('img', { name: 'Usage trend · Cost' })).toBeTruthy()
 })

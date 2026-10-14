@@ -62,17 +62,30 @@ const statisticsSchema = z.object({
   models: z.array(statisticSchema).max(20),
   groups: z.array(statisticSchema).max(20),
   activity: activitySchema,
+  cost: z.object({
+    estimated_micro_usd: z.number().int().nonnegative(),
+    unpriced_tokens: z.number().int().nonnegative(),
+    days: z
+      .array(
+        z.object({
+          id: z.string(),
+          estimated_micro_usd: z.number().int().nonnegative(),
+        }),
+      )
+      .max(90),
+  }),
 })
 export type Activity = z.infer<typeof activitySchema>
 export type ActivityCell = z.infer<typeof activityCellSchema>
 export type Metrics = z.infer<typeof metricsSchema>
 export type Statistic = z.infer<typeof statisticSchema>
-export type UsageMetric = 'requests' | 'input_tokens' | 'output_tokens'
+export type UsageMetric = 'tokens' | 'requests' | 'cost'
 export const metricLabels = {
+  tokens: 'usageMetricTokens',
   requests: 'usageRequests',
-  input_tokens: 'usageInputTokens',
-  output_tokens: 'usageOutputTokens',
+  cost: 'usageMetricCost',
 } as const
+export type ActivityMetric = Exclude<UsageMetric, 'cost'>
 export type UsageScope = 'personal' | 'all'
 export function statisticsOptions(
   client: QueryClient,
@@ -108,22 +121,21 @@ type ReportedUsage = Pick<
 
 export function metricValue(
   row: ReportedUsage,
-  metric: UsageMetric,
+  metric: ActivityMetric,
   collected = true,
 ) {
   if (!collected) return null
   if (metric === 'requests') return row.requests
-  const reported =
-    metric === 'input_tokens' ? row.input_reported : row.output_reported
   // An observed period without calls is zero; calls without token reports remain unknown.
-  return row.requests === 0 || reported > 0 ? row[metric] : null
+  return row.requests === 0 || row.input_reported > 0 || row.output_reported > 0
+    ? row.input_tokens + row.output_tokens
+    : null
 }
 
-export function metricPartial(row: ReportedUsage, metric: UsageMetric) {
+export function metricPartial(row: ReportedUsage, metric: ActivityMetric) {
   return (
     metric !== 'requests' &&
-    (metric === 'input_tokens' ? row.input_reported : row.output_reported) <
-      row.requests
+    (row.input_reported < row.requests || row.output_reported < row.requests)
   )
 }
 export function ownLimitOptions(

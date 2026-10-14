@@ -7,113 +7,66 @@ import {
   type PointerEvent,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  metricLabels,
-  metricValue,
-  metricPartial,
-  type Statistic,
-  type UsageMetric,
-} from '@/lib/statistics'
 
-const value = metricValue
-const partial = metricPartial
+export type TrendPoint = {
+  id: string
+  // null marks calls without the reports needed for this metric.
+  amount: number | null
+  partial: boolean
+}
 
 export function UsageChart({
-  rows,
-  metric,
-  daily,
+  points,
   label,
+  metricLabel,
+  format,
+  axis,
 }: {
-  rows: Statistic[]
-  metric: UsageMetric
-  daily: boolean
+  points: TrendPoint[]
   label: string
+  metricLabel: string
+  format: (value: number) => string
+  axis: (value: number) => string
 }) {
-  const { t, i18n } = useTranslation()
-  const numbers = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')
-  if (!rows.length)
+  const { t } = useTranslation()
+  if (!points.length)
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
         {t('noUsageSummary')}
       </p>
     )
-  const amounts = rows.map((row) => value(row, metric))
   if (
-    metric !== 'requests' &&
-    !rows.some(
-      (row) =>
-        (metric === 'input_tokens' ? row.input_reported : row.output_reported) >
-        0,
-    ) &&
-    rows.some((row) => row.requests > 0)
+    points.some((point) => point.amount === null) &&
+    points.every((point) => !point.amount)
   )
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
         {t('usageNoTokenReports')}
       </p>
     )
-  if (daily)
-    return (
-      <DailyChart rows={rows} metric={metric} amounts={amounts} label={label} />
-    )
-  const maximum = Math.max(1, ...amounts.map((amount) => amount ?? 0))
   return (
-    <div className="space-y-5">
-      <ol
-        aria-label={label}
-        className="max-h-[28rem] space-y-5 overflow-y-auto pr-2"
-      >
-        {rows.map((row, index) => (
-          <li key={row.id} className="space-y-2">
-            <div className="flex items-start justify-between gap-4 text-sm">
-              <span
-                className="min-w-0 break-words font-medium"
-                title={row.name}
-              >
-                {row.name}
-              </span>
-              <span className="shrink-0 tabular-nums">
-                {amounts[index] === null
-                  ? '—'
-                  : numbers.format(amounts[index]!)}
-              </span>
-            </div>
-            <div
-              aria-hidden="true"
-              className="h-2 overflow-hidden rounded-full bg-muted"
-            >
-              <div
-                className="h-full rounded-full bg-foreground"
-                style={{ width: ((amounts[index] ?? 0) / maximum) * 100 + '%' }}
-              />
-            </div>
-            {partial(row, metric) && (
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  amounts[index] === null
-                    ? 'usageTokenNotReported'
-                    : 'usageReportedOnly',
-                )}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
-      <p className="text-xs text-muted-foreground">{t('usageRankHint')}</p>
-    </div>
+    <DailyChart
+      points={points}
+      label={label}
+      metricLabel={metricLabel}
+      format={format}
+      axis={axis}
+    />
   )
 }
 
 function DailyChart({
-  rows,
-  metric,
-  amounts,
+  points,
   label,
+  metricLabel,
+  format,
+  axis,
 }: {
-  rows: Statistic[]
-  metric: UsageMetric
-  amounts: (number | null)[]
+  points: TrendPoint[]
   label: string
+  metricLabel: string
+  format: (value: number) => string
+  axis: (value: number) => string
 }) {
   const { t, i18n } = useTranslation()
   const help = useId()
@@ -132,11 +85,6 @@ function DailyChart({
     return () => observer.disconnect()
   }, [])
   const locale = i18n.resolvedLanguage ?? 'en'
-  const numbers = new Intl.NumberFormat(locale)
-  const compact = new Intl.NumberFormat(locale, {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  })
   const dates = new Intl.DateTimeFormat(locale, {
     month: 'short',
     day: 'numeric',
@@ -146,55 +94,40 @@ function DailyChart({
     dateStyle: 'medium',
     timeZone: 'UTC',
   })
-  const maximum = Math.max(1, ...amounts.map((amount) => amount ?? 0))
+  const amounts = points.map((point) => point.amount)
+  const maximum = Math.max(1e-6, ...amounts.map((amount) => amount ?? 0))
   const magnitude = 10 ** Math.floor(Math.log10(maximum / 4))
-  const step = Math.max(
-    1,
+  const step =
     ([1, 2, 5, 10].find((size) => size * magnitude >= maximum / 4) ?? 10) *
-      magnitude,
-  )
+    magnitude
   const top = Math.ceil(maximum / step) * step
-  const left = 52,
+  const left = 60,
     right = 16,
     height = 260,
     bottom = 222
-  const x = (index: number) =>
-    rows.length === 1
-      ? (left + width - right) / 2
-      : left + (index / (rows.length - 1)) * (width - left - right)
+  const slot = (width - left - right) / points.length
+  const barWidth = Math.max(2, Math.min(48, slot * 0.6))
+  const x = (index: number) => left + (index + 0.5) * slot
   const y = (amount: number) => bottom - (amount / top) * (bottom - 16)
   const ticks = Array.from(
     { length: Math.round(top / step) + 1 },
     (_, index) => index * step,
   )
-  const tickCount = Math.min(rows.length, width < 480 ? 3 : 6)
+  const tickCount = Math.min(points.length, width < 480 ? 3 : 6)
   const datesToShow = new Set(
     Array.from({ length: tickCount }, (_, index) =>
       tickCount === 1
         ? 0
-        : Math.round((index * (rows.length - 1)) / (tickCount - 1)),
+        : Math.round((index * (points.length - 1)) / (tickCount - 1)),
     ),
   )
-  const path = amounts
-    .map((amount, index) => {
-      if (amount === null) return ''
-      // Restart after unknown samples; connecting across them would imply observed usage.
-      const command = index === 0 || amounts[index - 1] === null ? 'M' : 'L'
-      return command + x(index) + ',' + y(amount)
-    })
-    .join(' ')
   const select = (event: PointerEvent<SVGSVGElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
     const relative = ((event.clientX - bounds.left) * width) / bounds.width
     setActive(
       Math.max(
         0,
-        Math.min(
-          rows.length - 1,
-          Math.round(
-            ((relative - left) / (width - left - right)) * (rows.length - 1),
-          ),
-        ),
+        Math.min(points.length - 1, Math.floor((relative - left) / slot)),
       ),
     )
   }
@@ -205,17 +138,17 @@ function DailyChart({
       event.key === 'Home'
         ? 0
         : event.key === 'End'
-          ? rows.length - 1
+          ? points.length - 1
           : Math.max(
               0,
               Math.min(
-                rows.length - 1,
+                points.length - 1,
                 (current ?? 0) + (event.key === 'ArrowLeft' ? -1 : 1),
               ),
             ),
     )
   }
-  const selected = active === null ? null : rows[active]
+  const selected = active === null ? null : points[active]
   return (
     <div ref={container} className="space-y-3">
       <svg
@@ -229,7 +162,7 @@ function DailyChart({
         onPointerMove={select}
         onPointerDown={select}
         onPointerLeave={() => setActive(null)}
-        onFocus={() => setActive(rows.length - 1)}
+        onFocus={() => setActive(points.length - 1)}
         onBlur={() => setActive(null)}
         onKeyDown={navigate}
       >
@@ -250,57 +183,43 @@ function DailyChart({
               fontSize={12}
               fill="var(--muted-foreground)"
             >
-              {compact.format(tick)}
+              {axis(tick)}
             </text>
           </g>
         ))}
-        <path
-          d={path}
-          fill="none"
-          stroke="var(--foreground)"
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-        />
+        {active !== null && (
+          <rect
+            x={x(active) - slot / 2}
+            y={16}
+            width={slot}
+            height={bottom - 16}
+            fill="var(--muted)"
+          />
+        )}
         {amounts.map((amount, index) =>
-          amount !== null && (rows.length <= 14 || index === active) ? (
-            <circle
-              key={rows[index].id}
-              cx={x(index)}
-              cy={y(amount)}
-              r={index === active ? 5 : 3}
-              fill="var(--background)"
-              stroke="var(--foreground)"
-              strokeWidth={2}
+          amount ? (
+            <rect
+              key={points[index].id}
+              x={x(index) - barWidth / 2}
+              y={y(amount)}
+              width={barWidth}
+              height={Math.max(1, bottom - y(amount))}
+              rx={Math.min(4, barWidth / 4)}
+              fill="var(--info)"
             />
           ) : null,
         )}
-        {active !== null && (
-          <line
-            x1={x(active)}
-            x2={x(active)}
-            y1={16}
-            y2={bottom}
-            stroke="var(--muted-foreground)"
-            strokeDasharray="3 4"
-          />
-        )}
-        {rows.map((row, index) =>
+        {points.map((point, index) =>
           datesToShow.has(index) ? (
             <text
-              key={row.id}
+              key={point.id}
               x={x(index)}
               y={height - 12}
-              textAnchor={
-                index === 0
-                  ? 'start'
-                  : index === rows.length - 1
-                    ? 'end'
-                    : 'middle'
-              }
+              textAnchor="middle"
               fontSize={12}
               fill="var(--muted-foreground)"
             >
-              {dates.format(Number(row.id) * 1000)}
+              {dates.format(Number(point.id) * 1000)}
             </text>
           ) : null,
         )}
@@ -313,18 +232,17 @@ function DailyChart({
         aria-live="polite"
         className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 text-sm"
       >
-        {selected && active !== null ? (
+        {selected ? (
           <>
             <span className="text-muted-foreground">
-              {fullDates.format(Number(selected.id) * 1000)} ·{' '}
-              {t(metricLabels[metric])}
+              {fullDates.format(Number(selected.id) * 1000)} · {metricLabel}
             </span>
             <strong className="font-medium tabular-nums">
-              {amounts[active] === null
+              {selected.amount === null
                 ? t('usageTokenNotReported')
-                : numbers.format(amounts[active]!)}
+                : format(selected.amount)}
             </strong>
-            {partial(selected, metric) && amounts[active] !== null && (
+            {selected.partial && selected.amount !== null && (
               <span className="text-xs text-muted-foreground">
                 {t('usageReportedOnly')}
               </span>
