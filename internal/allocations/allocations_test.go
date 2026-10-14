@@ -1724,3 +1724,34 @@ func TestDeleteSchemeRequiresDisabledAndReleasesPoolAndKeys(t *testing.T) {
 		t.Fatal("pool could not receive a new scheme", err)
 	}
 }
+
+func TestUnpricedHiddenModelsAreFreeButVisibleModelsStayRejected(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot=? WHERE id=?`, `{"models":["synthetic","synthetic-unpriced"],"hidden_models":["synthetic-internal"],"updated_at":1}`, account); err != nil {
+		t.Fatal(err)
+	}
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic amount", GroupID: 2, Enabled: true,
+		Config: Config{Mode: "amount", Period: "month", Members: []Share{{UserID: user, Limit: 1_000_000}},
+			Rates: []Rate{{Model: "synthetic", Input: 2_000_000, Cached: 200_000, Output: 4_000_000}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic-unpriced", now, time.UTC); !errors.Is(err, ErrUnpriced) {
+		t.Fatal("unpriced visible model was admitted", err)
+	}
+	request := Request{ID: "synthetic-hidden", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic-internal", StartedAt: now}
+	if err := Begin(ctx, q, request, now, time.UTC); err != nil {
+		t.Fatal("unpriced hidden model was rejected", err)
+	}
+	if err := Finish(ctx, q, request.ID, Completion{Input: 500_000, Output: 1000, Known: true, Dispatched: true}, now*1000, false); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := s.Detail(ctx, scheme.ID, user)
+	if err != nil || len(detail.Balances) != 1 || detail.Balances[0].Used != 0 {
+		t.Fatal("hidden model consumed the allowance", detail, err)
+	}
+}
