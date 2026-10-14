@@ -104,6 +104,7 @@ function scenario(stage: SetupProgress['stage'], member = false) {
         keys: state.stage === 'key' ? [] : [key],
         server_time: 1900000000,
         next_cursor: 0,
+        revoked_count: 0,
       })
     return response({ error: 'unavailable' }, 503)
   })

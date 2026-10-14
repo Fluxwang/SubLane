@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { App } from '@/App'
 import { createAppRouter } from '@/router'
 import { authOptions } from '@/lib/auth'
+import { i18n } from '@/lib/i18n'
 import * as queries from '@/lib/query'
 import { memberAuthenticated } from '@/test/fixtures'
 
@@ -27,7 +28,7 @@ const response = (value: unknown) =>
   new Response(
     JSON.stringify(
       value && typeof value === 'object' && 'keys' in value
-        ? { server_time: 1900000000, ...value }
+        ? { server_time: 1900000000, revoked_count: 0, ...value }
         : value,
     ),
   )
@@ -83,14 +84,85 @@ it('configures a specific personal key from its permitted model catalog', async 
   expect(calls.some((url) => url.includes('/reveal'))).toBe(false)
 })
 function open() {
-  render(
-    <App
-      router={createAppRouter(
-        createMemoryHistory({ initialEntries: ['/keys'] }),
-      )}
-    />,
+  const router = createAppRouter(
+    createMemoryHistory({ initialEntries: ['/keys'] }),
   )
+  return { router, ...render(<App router={router} />) }
 }
+
+it('shows revoked keys on demand, resets pagination on toggling, and hides them on revisiting', async () => {
+  const revoked = {
+    ...metadata,
+    id: 3,
+    name: 'Synthetic revoked',
+    enabled: false,
+    revoked_at: 1900000000,
+    copyable: false,
+  }
+  const paused = {
+    ...metadata,
+    id: 2,
+    name: 'Synthetic paused',
+    enabled: false,
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(memberAuthenticated))
+      const params = new URL(url, 'http://example.test').searchParams
+      const included = params.get('revoked') === 'include'
+      const cursor = params.get('cursor')
+      return Promise.resolve(
+        response({
+          keys: included
+            ? [revoked, paused]
+            : cursor === '2'
+              ? [metadata]
+              : [paused],
+          next_cursor: !included && cursor === '0' ? 2 : 0,
+          revoked_count: 1,
+        }),
+      )
+    }),
+  )
+  const user = userEvent.setup()
+  const { router } = open()
+  const toggle = await screen.findByRole('button', { name: 'Show revoked (1)' })
+  expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  expect(screen.getByText('Paused')).toBeTruthy()
+  expect(screen.queryByText('Synthetic revoked')).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Next' }))
+  await screen.findByText('Synthetic laptop')
+  await user.click(screen.getByRole('button', { name: 'Show revoked (1)' }))
+  await screen.findByText('Synthetic revoked')
+  expect(screen.getByText('Revoked')).toBeTruthy()
+  expect(
+    screen
+      .getByRole('button', { name: 'Show revoked (1)' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  expect(screen.queryByRole('button', { name: 'Previous' })).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Show revoked (1)' }))
+  await screen.findByText('Synthetic paused')
+  expect(screen.queryByText('Synthetic revoked')).toBeNull()
+  expect(screen.queryByText('Synthetic laptop')).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Show revoked (1)' }))
+  await screen.findByText('Synthetic revoked')
+  await act(async () => {
+    await router.navigate({ to: '/preferences' })
+  })
+  await act(async () => {
+    await router.navigate({ to: '/keys' })
+  })
+  await screen.findByText('Synthetic paused')
+  expect(
+    screen
+      .getByRole('button', { name: 'Show revoked (1)' })
+      .getAttribute('aria-pressed'),
+  ).toBe('false')
+  expect(screen.queryByText('Synthetic revoked')).toBeNull()
+})
 
 it('lets a member create, copy once, and revoke an owned key', async () => {
   let keys: (typeof metadata)[] = []
@@ -111,7 +183,15 @@ it('lets a member create, copy once, and revoke an owned key', async () => {
         keys = [metadata]
         return Promise.resolve(response({ key: metadata, secret }))
       }
-      return Promise.resolve(response({ keys, next_cursor: 0 }))
+      return Promise.resolve(
+        response({
+          keys: url.includes('revoked=include')
+            ? keys
+            : keys.filter((key) => key.revoked_at === null),
+          revoked_count: keys.filter((key) => key.revoked_at !== null).length,
+          next_cursor: 0,
+        }),
+      )
     })
   vi.stubGlobal('fetch', fetchMock)
   const user = userEvent.setup()
@@ -141,12 +221,144 @@ it('lets a member create, copy once, and revoke an owned key', async () => {
   )
   const revoke = await screen.findByRole('dialog', { name: 'Revoke API key' })
   await user.click(within(revoke).getByRole('button', { name: 'Revoke key' }))
+  await screen.findByText("Key revoked. Use 'Show revoked' to view it.")
+  expect(screen.queryByText('Synthetic laptop')).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Show revoked (1)' }))
   expect(await screen.findByText('Revoked')).toBeTruthy()
   expect(
     fetchMock.mock.calls.some(
       ([url]) => url === '/api/system' || url.startsWith('/api/members'),
     ),
   ).toBe(false)
+})
+
+it('removes a revoked key and updates its count before a slow list refresh finishes', async () => {
+  const paused = {
+    ...metadata,
+    id: 2,
+    name: 'Synthetic paused',
+    enabled: false,
+  }
+  let revoked = false
+  let finishRefresh!: (response: Response) => void
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(memberAuthenticated))
+      if (url === '/api/keys/1/revoke') {
+        revoked = true
+        return Promise.resolve(
+          response({ ...metadata, revoked_at: 1900000000, copyable: false }),
+        )
+      }
+      if (url.startsWith('/api/keys?') && revoked) {
+        return new Promise<Response>((resolve) => {
+          finishRefresh = resolve
+        })
+      }
+      return Promise.resolve(
+        response({ keys: [paused, metadata], next_cursor: 0 }),
+      )
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke Synthetic laptop' }),
+  )
+  const dialog = await screen.findByRole('dialog', { name: 'Revoke API key' })
+  await user.click(within(dialog).getByRole('button', { name: 'Revoke key' }))
+  await screen.findByText("Key revoked. Use 'Show revoked' to view it.")
+  expect(screen.queryByText('Synthetic laptop')).toBeNull()
+  expect(screen.getByText('Synthetic paused')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Show revoked (1)' })).toBeTruthy()
+  expect(document.activeElement).toBe(
+    screen.getByRole('heading', { name: 'API keys' }),
+  )
+  await act(async () => {
+    finishRefresh(
+      response({ keys: [paused], next_cursor: 0, revoked_count: 1 }),
+    )
+  })
+})
+
+it.each([
+  {
+    language: 'en',
+    title: 'No usable keys (1 revoked)',
+    show: 'Show revoked',
+    state: 'Revoked',
+  },
+  {
+    language: 'zh',
+    title: '没有可用密钥（1 个已撤销）',
+    show: '显示已撤销',
+    state: '已撤销',
+  },
+])(
+  'offers access to revoked keys in the all-revoked empty state ($language)',
+  async ({ language, title, show, state }) => {
+    await i18n.changeLanguage(language)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          response(
+            url === '/api/auth/state'
+              ? memberAuthenticated
+              : {
+                  keys: url.includes('revoked=include')
+                    ? [{ ...metadata, revoked_at: 1900000000, copyable: false }]
+                    : [],
+                  revoked_count: 1,
+                  next_cursor: 0,
+                },
+          ),
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    open()
+    await screen.findByRole('heading', { name: title })
+    await user.click(screen.getByRole('button', { name: show }))
+    await screen.findByText('Synthetic laptop')
+    expect(screen.getByText(state)).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: title })).toBeNull()
+  },
+)
+
+it('keeps the key and count unchanged when revocation fails', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) =>
+      Promise.resolve(
+        url === '/api/keys/1/revoke'
+          ? new Response(JSON.stringify({ error: 'unavailable' }), {
+              status: 503,
+            })
+          : response(
+              url === '/api/auth/state'
+                ? memberAuthenticated
+                : { keys: [metadata], next_cursor: 0 },
+            ),
+      ),
+    ),
+  )
+  const user = userEvent.setup()
+  open()
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke Synthetic laptop' }),
+  )
+  const dialog = await screen.findByRole('dialog', { name: 'Revoke API key' })
+  await user.click(within(dialog).getByRole('button', { name: 'Revoke key' }))
+  await screen.findByText('Could not revoke this key. Please try again.')
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(screen.getByText('Synthetic laptop')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Show revoked (0)' })).toBeTruthy()
+  expect(
+    screen.queryByText("Key revoked. Use 'Show revoked' to view it."),
+  ).toBeNull()
 })
 
 it('discards a displayed secret when a background check changes the user', async () => {

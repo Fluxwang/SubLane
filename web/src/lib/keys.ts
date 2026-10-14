@@ -24,22 +24,29 @@ const pageSchema = z.object({
   keys: z.array(keySchema).max(50),
   server_time: z.number().int(),
   next_cursor: z.number().int().nonnegative(),
+  revoked_count: z.number().int().nonnegative(),
 })
 const createdSchema = z.object({
   key: keySchema,
   secret: secretSchema,
 })
 export type APIKey = z.infer<typeof keySchema>
+export type KeyPage = z.infer<typeof pageSchema>
 
 export function keyOptions(
   client: QueryClient,
   userID: number,
   cursor: number,
+  includeRevoked: boolean,
 ) {
   return queryOptions({
-    queryKey: ['keys', userID, cursor],
+    queryKey: ['keys', userID, cursor, includeRevoked],
     queryFn: ({ signal }) =>
-      request(`/api/keys?cursor=${cursor}`, pageSchema, { signal }),
+      request(
+        `/api/keys?cursor=${cursor}${includeRevoked ? '&revoked=include' : ''}`,
+        pageSchema,
+        { signal },
+      ),
     // These personal queries opt into member access and stop immediately if the active identity changes.
     enabled: () =>
       userID > 0 &&

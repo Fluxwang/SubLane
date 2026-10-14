@@ -57,9 +57,10 @@ type CreatedKey struct {
 	Secret string `json:"secret"`
 }
 type Page struct {
-	ServerTime int64 `json:"server_time"`
-	Keys       []Key `json:"keys"`
-	NextCursor int64 `json:"next_cursor"`
+	ServerTime   int64 `json:"server_time"`
+	Keys         []Key `json:"keys"`
+	NextCursor   int64 `json:"next_cursor"`
+	RevokedCount int64 `json:"revoked_count"`
 }
 type Principal struct{ KeyID, UserID, GroupID, TenantID int64 }
 type Service struct {
@@ -208,18 +209,29 @@ func (s *Service) create(ctx context.Context, userID, groupID, schemeID int64, n
 	return CreatedKey{Key: key, Secret: secret}, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, beforeID int64) (Page, error) {
+func (s *Service) List(ctx context.Context, userID, beforeID int64, includeRevoked bool) (Page, error) {
 	page := Page{Keys: []Key{}, ServerTime: s.now().Unix()}
 	if beforeID < 0 {
 		return page, ErrInput
 	}
-	rows, err := s.queries.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: beforeID})
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return page, err
+	}
+	defer tx.Rollback()
+	q := s.queries.WithTx(tx)
+	// The count and filtered page must describe the same snapshot during revocation.
+	page.RevokedCount, err = q.CountRevokedKeys(ctx, db.CountRevokedKeysParams{UserID: userID, TenantID: s.tenantID})
+	if err != nil {
+		return page, err
+	}
+	rows, err := q.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: beforeID, IncludeRevoked: includeRevoked})
 	if err != nil {
 		return page, err
 	}
 	for _, row := range rows {
 		key := Key(row)
-		if _, err := allocations.KeyScheme(ctx, s.queries, key.ID, userID, key.GroupID, s.now().Unix()); err != nil {
+		if _, err := allocations.KeyScheme(ctx, q, key.ID, userID, key.GroupID, page.ServerTime); err != nil {
 			if !errors.Is(err, allocations.ErrUnavailable) {
 				return page, err
 			}
@@ -231,7 +243,7 @@ func (s *Service) List(ctx context.Context, userID, beforeID int64) (Page, error
 		page.Keys = page.Keys[:50]
 		page.NextCursor = page.Keys[49].ID
 	}
-	return page, nil
+	return page, tx.Commit()
 }
 
 var ErrInactive = errors.New("api_key_inactive")

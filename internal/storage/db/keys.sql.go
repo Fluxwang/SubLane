@@ -52,6 +52,23 @@ func (q *Queries) CountActiveKeys(ctx context.Context, arg CountActiveKeysParams
 	return count, err
 }
 
+const countRevokedKeys = `-- name: CountRevokedKeys :one
+SELECT count(*) FROM api_keys k JOIN account_groups g ON g.id=k.group_id
+WHERE k.user_id=?1 AND g.tenant_id=?2 AND k.revoked_at IS NOT NULL
+`
+
+type CountRevokedKeysParams struct {
+	UserID   int64
+	TenantID int64
+}
+
+func (q *Queries) CountRevokedKeys(ctx context.Context, arg CountRevokedKeysParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRevokedKeys, arg.UserID, arg.TenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createKey = `-- name: CreateKey :execlastid
 INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at,expires_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7)
@@ -206,14 +223,16 @@ CAST(COALESCE((SELECT scheme_id FROM allocation_keys WHERE key_id=k.id),0) AS IN
 CAST(COALESCE((SELECT s.name FROM allocation_keys ak JOIN allocation_schemes s ON s.id=ak.scheme_id WHERE ak.key_id=k.id),'') AS TEXT) AS scheme_name
 FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.user_id
 WHERE k.user_id=?1 AND g.tenant_id=?2
-AND (k.id<?3 OR ?3=0)
+AND (k.revoked_at IS NULL OR ?3)
+AND (k.id<?4 OR ?4=0)
 ORDER BY k.id DESC LIMIT 51
 `
 
 type ListKeysParams struct {
-	UserID   int64
-	TenantID int64
-	BeforeID int64
+	UserID         int64
+	TenantID       int64
+	IncludeRevoked interface{}
+	BeforeID       int64
 }
 
 type ListKeysRow struct {
@@ -234,7 +253,12 @@ type ListKeysRow struct {
 }
 
 func (q *Queries) ListKeys(ctx context.Context, arg ListKeysParams) ([]ListKeysRow, error) {
-	rows, err := q.db.QueryContext(ctx, listKeys, arg.UserID, arg.TenantID, arg.BeforeID)
+	rows, err := q.db.QueryContext(ctx, listKeys,
+		arg.UserID,
+		arg.TenantID,
+		arg.IncludeRevoked,
+		arg.BeforeID,
+	)
 	if err != nil {
 		return nil, err
 	}

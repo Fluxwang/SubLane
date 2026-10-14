@@ -60,7 +60,7 @@ func (h *keyHTTP) list(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = value
 	}
-	page, err := h.service.List(r.Context(), sessionUser(r).ID, cursor)
+	page, err := h.service.List(r.Context(), sessionUser(r).ID, cursor, r.URL.Query().Get("revoked") == "include")
 	if err != nil {
 		keyError(w, err)
 		return

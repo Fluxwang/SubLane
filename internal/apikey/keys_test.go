@@ -69,7 +69,7 @@ func TestPersonalKeysAreBoundToWorkspace(t *testing.T) {
 		own     CreatedKey
 		other   CreatedKey
 	}{{first, a, b}, {second, b, a}} {
-		page, err := check.service.List(ctx, member.ID, 0)
+		page, err := check.service.List(ctx, member.ID, 0, false)
 		if err != nil || len(page.Keys) != 1 || page.Keys[0].ID != check.own.Key.ID {
 			t.Fatalf("key metadata leaked across workspaces: %+v, %v", page, err)
 		}
@@ -185,7 +185,7 @@ func TestKeyOwnershipHashingAndRevocation(t *testing.T) {
 	if string(digest) != string(expected[:]) {
 		t.Fatal("plaintext key is not hashed")
 	}
-	page, err := keys.List(ctx, member.ID, 0)
+	page, err := keys.List(ctx, member.ID, 0, false)
 	if err != nil || len(page.Keys) != 1 {
 		t.Fatal("missing own key", err)
 	}
@@ -193,7 +193,7 @@ func TestKeyOwnershipHashingAndRevocation(t *testing.T) {
 	if strings.Contains(string(payload), created.Secret) || strings.Contains(string(payload), "token_hash") {
 		t.Fatal("secret leaked in metadata")
 	}
-	other, err := keys.List(ctx, 1, 0)
+	other, err := keys.List(ctx, 1, 0, false)
 	if err != nil || len(other.Keys) != 0 {
 		t.Fatal("another user's keys were exposed")
 	}
@@ -222,7 +222,7 @@ func TestKeyOwnershipHashingAndRevocation(t *testing.T) {
 	if _, err := keys.Authenticate(ctx, created.Secret); !errors.Is(err, ErrInvalidKey) {
 		t.Fatal("revoked key worked")
 	}
-	page, err = keys.List(ctx, member.ID, 0)
+	page, err = keys.List(ctx, member.ID, 0, true)
 	if err != nil || page.Keys[0].RevokedAt == nil || page.Keys[0].LastUsedAt == nil {
 		t.Fatal("missing key lifecycle metadata", err)
 	}
@@ -322,7 +322,7 @@ func TestKeysEnforceGroupGrantsOnCreationAndEveryAuthentication(t *testing.T) {
 	if _, err := keys.Authenticate(ctx, created.Secret); !errors.Is(err, ErrInvalidKey) {
 		t.Fatal("revoked group access remained usable", err)
 	}
-	page, err := keys.List(ctx, member.ID, 0)
+	page, err := keys.List(ctx, member.ID, 0, false)
 	if err != nil || page.Keys[0].GroupAccess != "blocked" {
 		t.Fatal("blocked group not reflected in metadata", err)
 	}
