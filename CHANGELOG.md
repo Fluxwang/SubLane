@@ -2,6 +2,11 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.0] - 2026-10-16
+
+### Added
+
+- Hide revoked API keys by default (#83)
 ## [0.6.0] - 2026-10-13
 
 ### Added
@@ -190,6 +195,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.7.0]: https://github.com/murongg/SubLane/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/murongg/SubLane/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/murongg/SubLane/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/murongg/SubLane/compare/v0.3.0...v0.4.0
