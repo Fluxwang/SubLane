@@ -206,14 +206,16 @@ CAST(COALESCE((SELECT scheme_id FROM allocation_keys WHERE key_id=k.id),0) AS IN
 CAST(COALESCE((SELECT s.name FROM allocation_keys ak JOIN allocation_schemes s ON s.id=ak.scheme_id WHERE ak.key_id=k.id),'') AS TEXT) AS scheme_name
 FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.user_id
 WHERE k.user_id=?1 AND g.tenant_id=?2
-AND (k.id<?3 OR ?3=0)
+AND (k.revoked_at IS NULL OR CAST(?3 AS BOOLEAN))
+AND (k.id<?4 OR ?4=0)
 ORDER BY k.id DESC LIMIT 51
 `
 
 type ListKeysParams struct {
-	UserID   int64
-	TenantID int64
-	BeforeID int64
+	UserID         int64
+	TenantID       int64
+	IncludeRevoked bool
+	BeforeID       int64
 }
 
 type ListKeysRow struct {
@@ -234,7 +236,12 @@ type ListKeysRow struct {
 }
 
 func (q *Queries) ListKeys(ctx context.Context, arg ListKeysParams) ([]ListKeysRow, error) {
-	rows, err := q.db.QueryContext(ctx, listKeys, arg.UserID, arg.TenantID, arg.BeforeID)
+	rows, err := q.db.QueryContext(ctx, listKeys,
+		arg.UserID,
+		arg.TenantID,
+		arg.IncludeRevoked,
+		arg.BeforeID,
+	)
 	if err != nil {
 		return nil, err
 	}

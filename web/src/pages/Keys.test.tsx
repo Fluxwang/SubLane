@@ -92,6 +92,154 @@ function open() {
   )
 }
 
+it('resets pagination in both directions and keeps filtered pages in separate caches', async () => {
+  const calls: string[] = []
+  const active = { ...metadata, id: 4, name: 'Synthetic active' }
+  const paused = {
+    ...metadata,
+    id: 2,
+    name: 'Synthetic paused',
+    enabled: false,
+  }
+  const revoked = {
+    ...metadata,
+    id: 8,
+    name: 'Synthetic revoked',
+    revoked_at: 1900000000,
+    copyable: false,
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(memberAuthenticated))
+      calls.push(url)
+      const params = new URL(url, 'http://example.test').searchParams
+      const cursor = params.get('cursor')
+      const includeRevoked = params.get('include_revoked') === 'true'
+      const page = includeRevoked
+        ? cursor === '0'
+          ? { keys: [revoked], next_cursor: 8 }
+          : { keys: [active], next_cursor: 0 }
+        : cursor === '0'
+          ? { keys: [active], next_cursor: 3 }
+          : { keys: [paused], next_cursor: 0 }
+      return Promise.resolve(response(page))
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await screen.findByText('Synthetic active')
+  const toggle = screen.getByRole('switch', {
+    name: 'Show revoked',
+  }) as HTMLInputElement
+  expect(toggle.checked).toBe(false)
+  await user.click(screen.getByRole('button', { name: 'Next' }))
+  await screen.findByText('Synthetic paused')
+  await user.click(toggle)
+  await screen.findByText('Synthetic revoked')
+  expect(
+    screen.getByRole('button', { name: 'Previous' }).hasAttribute('disabled'),
+  ).toBe(true)
+  expect(
+    screen
+      .getByRole('button', { name: 'Edit Synthetic revoked' })
+      .hasAttribute('disabled'),
+  ).toBe(true)
+  await user.click(screen.getByRole('button', { name: 'Next' }))
+  await screen.findByText('Synthetic active')
+  await user.click(toggle)
+  await screen.findByText('Synthetic active')
+  expect(
+    screen.getByRole('button', { name: 'Previous' }).hasAttribute('disabled'),
+  ).toBe(true)
+  expect(screen.queryByText('Synthetic revoked')).toBeNull()
+  expect(calls).toContain('/api/keys?cursor=0&include_revoked=false')
+  expect(calls).toContain('/api/keys?cursor=3&include_revoked=false')
+  expect(calls).toContain('/api/keys?cursor=0&include_revoked=true')
+  expect(calls).toContain('/api/keys?cursor=8&include_revoked=true')
+  expect(calls).not.toContain('/api/keys?cursor=3&include_revoked=true')
+  expect(calls).not.toContain('/api/keys?cursor=8&include_revoked=false')
+})
+
+it('keeps the revoked toggle available in empty and failed filtered views', async () => {
+  let fail = true
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(memberAuthenticated))
+      if (fail && url.includes('include_revoked=true'))
+        return Promise.resolve(new Response('{}', { status: 503 }))
+      return Promise.resolve(response({ keys: [], next_cursor: 0 }))
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await screen.findByText('No unrevoked API keys')
+  expect(
+    screen.getByText(
+      'Create a personal key, or turn on Show revoked to view past keys.',
+    ),
+  ).toBeTruthy()
+  const toggle = screen.getByRole('switch', { name: 'Show revoked' })
+  await user.click(toggle)
+  await screen.findByText('Could not load your API keys. Please try again.')
+  await user.click(toggle)
+  await screen.findByText('No unrevoked API keys')
+  fail = false
+  await user.click(toggle)
+  await screen.findByText('No API keys yet')
+})
+
+it('returns to the first page after revoking the last key on a later page', async () => {
+  let revoked = false
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(memberAuthenticated))
+      if (url.endsWith('/revoke')) {
+        revoked = true
+        return Promise.resolve(
+          response({
+            ...metadata,
+            id: 2,
+            revoked_at: 1900000000,
+            copyable: false,
+          }),
+        )
+      }
+      const cursor = new URL(url, 'http://example.test').searchParams.get(
+        'cursor',
+      )
+      return Promise.resolve(
+        response(
+          cursor === '0'
+            ? {
+                keys: [{ ...metadata, id: 4, name: 'Synthetic first' }],
+                next_cursor: revoked ? 0 : 3,
+              }
+            : { keys: revoked ? [] : [{ ...metadata, id: 2 }], next_cursor: 0 },
+        ),
+      )
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await screen.findByText('Synthetic first')
+  await user.click(screen.getByRole('button', { name: 'Next' }))
+  await user.click(
+    await screen.findByRole('button', { name: 'Revoke Synthetic laptop' }),
+  )
+  const dialog = await screen.findByRole('dialog', { name: 'Revoke API key' })
+  await user.click(within(dialog).getByRole('button', { name: 'Revoke key' }))
+  await screen.findByText('Synthetic laptop was revoked.')
+  await screen.findByText('Synthetic first')
+  expect(screen.queryByText('No unrevoked API keys')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Previous' })).toBeNull()
+})
+
 it('lets a member create, copy once, and revoke an owned key', async () => {
   let keys: (typeof metadata)[] = []
   const fetchMock = vi
@@ -104,20 +252,29 @@ it('lets a member create, copy once, and revoke an owned key', async () => {
           response({ groups: [{ id: 1, name: 'Default', account_count: 1 }] }),
         )
       if (url.endsWith('/revoke')) {
-        keys = [{ ...metadata, revoked_at: 1900000100 }]
+        keys = [{ ...metadata, revoked_at: 1900000100, copyable: false }]
         return Promise.resolve(response(keys[0]))
       }
       if (init?.method === 'POST') {
         keys = [metadata]
         return Promise.resolve(response({ key: metadata, secret }))
       }
-      return Promise.resolve(response({ keys, next_cursor: 0 }))
+      const includeRevoked =
+        new URL(url, 'http://example.test').searchParams.get(
+          'include_revoked',
+        ) === 'true'
+      return Promise.resolve(
+        response({
+          keys: keys.filter((key) => includeRevoked || key.revoked_at === null),
+          next_cursor: 0,
+        }),
+      )
     })
   vi.stubGlobal('fetch', fetchMock)
   const user = userEvent.setup()
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
   open()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   await user.click(screen.getByRole('button', { name: 'Create key' }))
   const form = await screen.findByRole('dialog', { name: 'Create API key' })
   await user.click(within(form).getByRole('button', { name: 'Resource group' }))
@@ -141,6 +298,10 @@ it('lets a member create, copy once, and revoke an owned key', async () => {
   )
   const revoke = await screen.findByRole('dialog', { name: 'Revoke API key' })
   await user.click(within(revoke).getByRole('button', { name: 'Revoke key' }))
+  expect(await screen.findByText('Synthetic laptop was revoked.')).toBeTruthy()
+  await screen.findByText('No unrevoked API keys')
+  expect(screen.queryByText('Synthetic laptop')).toBeNull()
+  await user.click(screen.getByRole('switch', { name: 'Show revoked' }))
   expect(await screen.findByText('Revoked')).toBeTruthy()
   expect(
     fetchMock.mock.calls.some(
@@ -168,7 +329,7 @@ it('discards a displayed secret when a background check changes the user', async
   )
   const user = userEvent.setup()
   open()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   await user.click(screen.getByRole('button', { name: 'Create key' }))
   const form = await screen.findByRole('dialog', { name: 'Create API key' })
   await user.click(within(form).getByRole('button', { name: 'Resource group' }))
@@ -228,7 +389,7 @@ it('requires an explicit pool choice before binding a key', async () => {
   vi.stubGlobal('fetch', fetch)
   open()
   const user = userEvent.setup()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   await user.click(screen.getByRole('button', { name: 'Create key' }))
   const dialog = await screen.findByRole('dialog', { name: 'Create API key' })
   await within(dialog).findByText('Choose a resource group')
@@ -266,7 +427,7 @@ it('warns that a key bound to an empty pool cannot serve requests yet', async ()
   )
   const user = userEvent.setup()
   open()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   await user.click(screen.getByRole('button', { name: 'Create key' }))
   const dialog = await screen.findByRole('dialog', { name: 'Create API key' })
   await user.click(
@@ -294,7 +455,7 @@ it('opens client setup on demand, copies the model config, and restores focus on
   const user = userEvent.setup()
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
   open()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   expect(fetch.mock.calls.some(([url]) => url === '/api/connection')).toBe(
     false,
   )
@@ -469,7 +630,7 @@ it('creates a key with the selected expiry period', async () => {
   )
   const user = userEvent.setup()
   open()
-  await screen.findByText('No API keys yet')
+  await screen.findByText('No unrevoked API keys')
   await user.click(screen.getByRole('button', { name: 'Create key' }))
   const dialog = await screen.findByRole('dialog')
   await user.click(

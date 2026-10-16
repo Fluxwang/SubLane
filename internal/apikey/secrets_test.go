@@ -74,7 +74,7 @@ func TestEncryptedKeyDisclosureOwnershipAndLifecycle(t *testing.T) {
 	if value, err := keys.Reveal(ctx, 1, created.Key.ID); !errors.Is(err, ErrNotFound) || value != "" {
 		t.Fatal("admin read another user's key")
 	}
-	page, err := keys.List(ctx, member.ID, 0)
+	page, err := keys.List(ctx, member.ID, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestLegacyKeysAndCorruptSecretsFailDisclosure(t *testing.T) {
 	if _, err := keys.Authenticate(ctx, secret); err != nil {
 		t.Fatal("legacy authentication changed", err)
 	}
-	page, err := keys.List(ctx, 1, 0)
+	page, err := keys.List(ctx, 1, Filter{})
 	if err != nil || page.Keys[0].Copyable {
 		t.Fatal("legacy key falsely copyable", err)
 	}

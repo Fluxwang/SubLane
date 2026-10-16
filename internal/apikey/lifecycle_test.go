@@ -86,7 +86,7 @@ func TestKeyLifecycleAndExpiryBoundary(t *testing.T) {
 	if _, err := keys.CreateInGroup(ctx, 1, 1, "Rollback"); err == nil {
 		t.Fatal("audit failure ignored")
 	}
-	page, err := keys.List(ctx, 1, 0)
+	page, err := keys.List(ctx, 1, Filter{IncludeRevoked: true})
 	if err != nil || len(page.Keys) != 1 {
 		t.Fatal("key survived audit failure", err)
 	}

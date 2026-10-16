@@ -35,11 +35,16 @@ export function keyOptions(
   client: QueryClient,
   userID: number,
   cursor: number,
+  includeRevoked: boolean,
 ) {
   return queryOptions({
-    queryKey: ['keys', userID, cursor],
+    queryKey: ['keys', userID, cursor, includeRevoked],
     queryFn: ({ signal }) =>
-      request(`/api/keys?cursor=${cursor}`, pageSchema, { signal }),
+      request(
+        `/api/keys?cursor=${cursor}&include_revoked=${includeRevoked}`,
+        pageSchema,
+        { signal },
+      ),
     // These personal queries opt into member access and stop immediately if the active identity changes.
     enabled: () =>
       userID > 0 &&

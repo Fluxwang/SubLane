@@ -1089,6 +1089,10 @@ export const en = {
   keysLoadFailed: 'Could not load your API keys. Please try again.',
   noKeys: 'No API keys yet',
   noKeysDescription: 'Create a personal key for your client or application.',
+  noUnrevokedKeys: 'No unrevoked API keys',
+  noUnrevokedKeysDescription:
+    'Create a personal key, or turn on Show revoked to view past keys.',
+  showRevokedKeys: 'Show revoked',
   keyLastUsed: 'Last used',
   neverUsed: 'Never',
   revoked: 'Revoked',
@@ -1099,6 +1103,7 @@ export const en = {
   revokeKeyDescription:
     'Revoke “{{name}}”? Clients using this key will lose access. This cannot be undone.',
   keyRevokeFailed: 'Could not revoke this key. Please try again.',
+  keyRevokedNotice: '{{name}} was revoked.',
   manageKeys: 'Manage API keys',
   membersDescription:
     'Disabling a member immediately blocks their keys in this workspace only.',

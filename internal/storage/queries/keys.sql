@@ -30,6 +30,7 @@ CAST(COALESCE((SELECT scheme_id FROM allocation_keys WHERE key_id=k.id),0) AS IN
 CAST(COALESCE((SELECT s.name FROM allocation_keys ak JOIN allocation_schemes s ON s.id=ak.scheme_id WHERE ak.key_id=k.id),'') AS TEXT) AS scheme_name
 FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.user_id
 WHERE k.user_id=sqlc.arg(user_id) AND g.tenant_id=sqlc.arg(tenant_id)
+AND (k.revoked_at IS NULL OR CAST(sqlc.arg(include_revoked) AS BOOLEAN))
 AND (k.id<sqlc.arg(before_id) OR sqlc.arg(before_id)=0)
 ORDER BY k.id DESC LIMIT 51;
 

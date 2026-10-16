@@ -28,8 +28,10 @@ function KeyManager({ userID }: { userID: number }) {
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
   const [cursors, setCursors] = useState([0])
+  const [includeRevoked, setIncludeRevoked] = useState(false)
+  const [revokedName, setRevokedName] = useState('')
   const query = useQuery(
-    keyOptions(client, userID, cursors[cursors.length - 1]),
+    keyOptions(client, userID, cursors[cursors.length - 1], includeRevoked),
   )
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
@@ -63,19 +65,44 @@ function KeyManager({ userID }: { userID: number }) {
           <CreateKey
             userID={userID}
             onCreated={() => {
+              setRevokedName('')
               setCursors([0])
               return invalidate()
             }}
           />
         </div>
       </div>
-      <p
-        data-tour="access"
-        tabIndex={-1}
-        className="text-sm leading-6 text-muted-foreground"
-      >
-        {t('gatewayKeysNotice')}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <p
+          data-tour="access"
+          tabIndex={-1}
+          className="text-sm leading-6 text-muted-foreground"
+        >
+          {t('gatewayKeysNotice')}
+        </p>
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            className="peer sr-only"
+            checked={includeRevoked}
+            onChange={(event) => {
+              setIncludeRevoked(event.target.checked)
+              setCursors([0])
+            }}
+          />
+          <span
+            aria-hidden="true"
+            className="relative h-5 w-9 shrink-0 rounded-full bg-muted-foreground/30 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-background after:transition-transform peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background motion-reduce:transition-none motion-reduce:after:transition-none"
+          />
+          <span>{t('showRevokedKeys')}</span>
+        </label>
+      </div>
+      {revokedName && (
+        <p role="status" className="break-words text-sm text-success">
+          {t('keyRevokedNotice', { name: revokedName })}
+        </p>
+      )}
       {query.isPending ? (
         <p
           role="status"
@@ -107,9 +134,15 @@ function KeyManager({ userID }: { userID: number }) {
             className="mb-4 size-8 text-muted-foreground"
             aria-hidden="true"
           />
-          <h2 className="font-medium">{t('noKeys')}</h2>
+          <h2 className="font-medium">
+            {t(includeRevoked ? 'noKeys' : 'noUnrevokedKeys')}
+          </h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            {t('noKeysDescription')}
+            {t(
+              includeRevoked
+                ? 'noKeysDescription'
+                : 'noUnrevokedKeysDescription',
+            )}
           </p>
         </section>
       ) : (
@@ -208,7 +241,12 @@ function KeyManager({ userID }: { userID: number }) {
                       <EditKey value={key} onSaved={invalidate} />
                       <RevokeKey
                         value={key}
-                        onRevoked={invalidate}
+                        onRevoked={() => {
+                          setRevokedName(key.name)
+                          // Revocation can empty the last page, so discard cursors into the old list.
+                          setCursors([0])
+                          return invalidate()
+                        }}
                         focusAfterRevoke={() => heading.current?.focus()}
                       />
                     </div>

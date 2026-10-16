@@ -102,6 +102,108 @@ func newTestKeyService(t *testing.T, connection *sql.DB) *apikey.Service {
 	}
 	return apikey.New(connection, cipher)
 }
+
+func TestKeyListFiltersRevokedBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic-keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	identity, err := auth.New(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := newTestKeyService(t, connection)
+	h := New(Options{Auth: identity, Keys: keys, Ping: connection.PingContext, StartedAt: time.Now()})
+	setup := request(h, "POST", "/api/auth/setup", "http://example.test", map[string]string{
+		"username": "synthetic-owner", "password": "synthetic-password", "workspace_name": "Synthetic workspace",
+	}, nil)
+	if setup.Code != 201 {
+		t.Fatalf("setup: %d", setup.Code)
+	}
+	cookie := setup.Result().Cookies()[0]
+	member, err := identity.CreateMember(ctx, "synthetic-member", "synthetic-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureTestPool(t, connection)
+	create := func(userID int64, name string) apikey.CreatedKey {
+		t.Helper()
+		key, err := keys.CreateInGroup(ctx, userID, 1, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	paused := create(1, "Synthetic paused")
+	if _, err := keys.Update(ctx, 1, paused.Key.ID, apikey.UpdateInput{Name: paused.Key.Name, Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	expired := create(1, "Synthetic expired")
+	if _, err := connection.Exec("UPDATE api_keys SET expires_at=1 WHERE id=?", expired.Key.ID); err != nil {
+		t.Fatal(err)
+	}
+	active := create(1, "Synthetic active")
+	foreign := create(member.ID, "Synthetic foreign")
+	for i := range 60 {
+		key := create(1, fmt.Sprintf("Synthetic revoked %d", i))
+		if _, err := keys.Revoke(ctx, 1, key.Key.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(path string) apikey.Page {
+		t.Helper()
+		result := request(h, "GET", path, "", nil, cookie)
+		var page apikey.Page
+		if result.Code != 200 || json.Unmarshal(result.Body.Bytes(), &page) != nil || page.Keys == nil {
+			t.Fatalf("invalid key page: %d %s", result.Code, result.Body.String())
+		}
+		if strings.Contains(result.Body.String(), active.Secret) {
+			t.Fatal("list disclosed a secret")
+		}
+		return page
+	}
+	for _, path := range []string{"/api/keys", "/api/keys?include_revoked=false"} {
+		page := list(path)
+		if len(page.Keys) != 3 || page.NextCursor != 0 || page.Keys[0].ID != active.Key.ID || page.Keys[1].ID != expired.Key.ID || page.Keys[2].ID != paused.Key.ID {
+			t.Fatalf("revoked records displaced unrevoked keys: %+v", page)
+		}
+	}
+	first := list("/api/keys?include_revoked=true")
+	if len(first.Keys) != 50 || first.NextCursor != first.Keys[49].ID {
+		t.Fatalf("invalid first page: %+v", first)
+	}
+	second := list(fmt.Sprintf("/api/keys?include_revoked=true&cursor=%d", first.NextCursor))
+	if len(second.Keys) != 13 || second.NextCursor != 0 {
+		t.Fatalf("invalid last page: %+v", second)
+	}
+	seen := map[int64]bool{}
+	for _, key := range append(first.Keys, second.Keys...) {
+		if seen[key.ID] || key.ID == foreign.Key.ID {
+			t.Fatal("duplicate or another owner's key", key.ID)
+		}
+		seen[key.ID] = true
+	}
+	page := list(fmt.Sprintf("/api/keys?cursor=%d", active.Key.ID))
+	if len(page.Keys) != 2 || page.Keys[0].ID != expired.Key.ID || page.NextCursor != 0 {
+		t.Fatalf("unrevoked cursor ignored: %+v", page)
+	}
+	for _, key := range []apikey.CreatedKey{active, expired, paused} {
+		if _, err := keys.Revoke(ctx, 1, key.Key.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if page := list("/api/keys"); len(page.Keys) != 0 || page.NextCursor != 0 {
+		t.Fatalf("all-revoked list is not empty: %+v", page)
+	}
+	if page := list("/api/keys?include_revoked=true"); len(page.Keys) != 50 || page.NextCursor == 0 {
+		t.Fatal("hidden records were lost")
+	}
+	if got := request(h, "GET", "/api/keys?include_revoked=invalid", "", nil, cookie).Code; got != 400 {
+		t.Fatalf("invalid filter accepted: %d", got)
+	}
+}
 func TestPersonalKeyDisclosureBoundaryAndNoStore(t *testing.T) {
 	ctx := context.Background()
 	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "disclosure.db"))

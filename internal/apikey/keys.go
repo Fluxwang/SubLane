@@ -61,6 +61,10 @@ type Page struct {
 	Keys       []Key `json:"keys"`
 	NextCursor int64 `json:"next_cursor"`
 }
+type Filter struct {
+	BeforeID       int64
+	IncludeRevoked bool
+}
 type Principal struct{ KeyID, UserID, GroupID, TenantID int64 }
 type Service struct {
 	vault    *vault.Vault
@@ -208,12 +212,12 @@ func (s *Service) create(ctx context.Context, userID, groupID, schemeID int64, n
 	return CreatedKey{Key: key, Secret: secret}, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, beforeID int64) (Page, error) {
+func (s *Service) List(ctx context.Context, userID int64, filter Filter) (Page, error) {
 	page := Page{Keys: []Key{}, ServerTime: s.now().Unix()}
-	if beforeID < 0 {
+	if filter.BeforeID < 0 {
 		return page, ErrInput
 	}
-	rows, err := s.queries.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: beforeID})
+	rows, err := s.queries.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: filter.BeforeID, IncludeRevoked: filter.IncludeRevoked})
 	if err != nil {
 		return page, err
 	}

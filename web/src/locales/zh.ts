@@ -984,6 +984,10 @@ export const zh: Record<keyof typeof en, string> = {
   keysLoadFailed: '加载 API 密钥失败，请重试。',
   noKeys: '还没有 API 密钥',
   noKeysDescription: '创建一个个人密钥，供客户端或应用使用。',
+  noUnrevokedKeys: '暂无未撤销的 API 密钥',
+  noUnrevokedKeysDescription:
+    '创建一个个人密钥，或开启“显示已撤销”查看历史密钥。',
+  showRevokedKeys: '显示已撤销',
   keyLastUsed: '上次使用',
   neverUsed: '未使用',
   revoked: '已撤销',
@@ -994,6 +998,7 @@ export const zh: Record<keyof typeof en, string> = {
   revokeKeyDescription:
     '确认撤销「{{name}}」？使用此密钥的客户端将失去访问权限，此操作无法撤销。',
   keyRevokeFailed: '撤销密钥失败，请重试。',
+  keyRevokedNotice: '已撤销「{{name}}」。',
   manageKeys: '管理 API 密钥',
   membersDescription: '停用成员会立即阻止其在本空间使用密钥，不影响其他空间。',
   addMember: '添加成员',

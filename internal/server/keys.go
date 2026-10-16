@@ -51,16 +51,24 @@ func (h *keyHTTP) requireAvailable(next http.Handler) http.Handler {
 }
 
 func (h *keyHTTP) list(w http.ResponseWriter, r *http.Request) {
-	var cursor int64
+	var filter apikey.Filter
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || value < 0 {
 			keyError(w, apikey.ErrInput)
 			return
 		}
-		cursor = value
+		filter.BeforeID = value
 	}
-	page, err := h.service.List(r.Context(), sessionUser(r).ID, cursor)
+	if raw := r.URL.Query().Get("include_revoked"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			keyError(w, apikey.ErrInput)
+			return
+		}
+		filter.IncludeRevoked = value
+	}
+	page, err := h.service.List(r.Context(), sessionUser(r).ID, filter)
 	if err != nil {
 		keyError(w, err)
 		return
