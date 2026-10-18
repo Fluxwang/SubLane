@@ -86,6 +86,52 @@ func TestOpenAddsInvitationMigrationToExistingSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAddsAffinityModelWithoutMovingLegacyBindings(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-affinity-upgrade.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := previous.ExecContext(ctx, `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "017_affinity_model.sql" {
+			break
+		}
+		if err := apply(ctx, previous, entry.Name()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := previous.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,role,created_at) VALUES(1,'synthetic-owner','synthetic-hash','admin',1);
+		INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(1,'Synthetic workspace',1,1);
+		INSERT INTO account_groups(id,name,enabled,created_at,updated_at) VALUES(1,'Synthetic pool',1,1,1);
+		INSERT INTO account_affinity(user_id,group_id,session_hash,provider,account_id,expires_at) VALUES(1,1,zeroblob(32),'auto','synthetic-original-account',1900000000)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var account, model string
+		var expiry int64
+		err = upgraded.QueryRowContext(ctx, "SELECT account_id,model,expires_at FROM account_affinity").Scan(&account, &model, &expiry)
+		upgraded.Close()
+		if err != nil || account != "synthetic-original-account" || model != "" || expiry != 1900000000 {
+			t.Fatalf("legacy binding changed: account=%q model=%q expiry=%d err=%v", account, model, expiry, err)
+		}
+	}
+}
+
 func TestOpenUpdatesAccountConcurrencyDefaultAndPreservesSettings(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-account-limits.db")

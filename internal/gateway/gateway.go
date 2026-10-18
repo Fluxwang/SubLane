@@ -195,7 +195,7 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 	if err := s.warmUsage(ctx, userID, groupID, discoveryProvider); err != nil {
 		return nil, err
 	}
-	id, digest, err := s.leaseAccount(ctx, entry, session, provider, model, kind)
+	id, digest, err := s.leaseAccount(ctx, entry, session, provider, model, kind, requestAffinity(input, kind))
 	if id != "" {
 		if account, lookupErr := s.accounts.Get(ctx, id); lookupErr == nil {
 			entry.record.Provider = account.Provider
