@@ -2,6 +2,12 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.1] - 2026-10-18
+
+### Fixed
+
+- Allow portable conversation model switches (#86)
+
 ## [0.7.0] - 2026-10-16
 
 ### Added
@@ -195,6 +201,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.7.1]: https://github.com/murongg/SubLane/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/murongg/SubLane/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/murongg/SubLane/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/murongg/SubLane/compare/v0.4.0...v0.5.0
