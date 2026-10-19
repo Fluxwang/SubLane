@@ -14,6 +14,7 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/content"
 	"github.com/murongg/SubLane/internal/groups"
+	"github.com/murongg/SubLane/internal/logging"
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
 	"github.com/murongg/SubLane/internal/timezone"
@@ -238,6 +239,8 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 			}
 		}()
 	}
+	// Use the local resource ID here; a provider credential's account ID may identify a user.
+	upstreamCtx = logging.WithLogger(upstreamCtx, logging.From(ctx).With("request_id", entry.record.RequestID, "tenant_id", s.tenantID, "account_id", id, "provider", entry.record.Provider))
 	executeOnce := func(c accounts.Credential) (*upstream.Stream, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err

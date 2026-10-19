@@ -327,6 +327,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		}
 		result, err := executor.Execute(ctx, auth, req, opts)
 		if err != nil {
+			logSDKFailure(ctx, "execute", err, transport)
 			return sdkFailureResponse(err, transport)
 		}
 		if len(result.Payload) > MaxBody {
@@ -338,6 +339,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 	result, err := executor.ExecuteStream(operation, auth, req, opts)
 	if err != nil {
 		cancel()
+		logSDKFailure(ctx, "execute", err, transport)
 		return sdkFailureResponse(err, transport)
 	}
 	reader, writer := io.Pipe()
@@ -346,6 +348,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		defer cancel()
 		for chunk := range result.Chunks {
 			if chunk.Err != nil {
+				logSDKFailure(ctx, "stream", chunk.Err, transport)
 				writer.CloseWithError(sdkError(chunk.Err))
 				return
 			}
@@ -405,6 +408,8 @@ type engineTransport struct {
 	requestedModel       string
 	rateModel            string
 	lastStatus           int
+	lastRequestID        string
+	failureKind          string
 	responseEpoch        uint64
 }
 
@@ -421,6 +426,10 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	response, err := t.base.RoundTrip(r)
 	if err != nil {
+		t.mu.Lock()
+		t.lastStatus, t.lastRequestID = 0, ""
+		t.failureKind = diagnosticErrorKind(err)
+		t.mu.Unlock()
 		return nil, err
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
@@ -431,6 +440,13 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.responseEpoch++
 	epoch := t.responseEpoch
 	t.lastStatus, t.rateModel = response.StatusCode, ""
+	t.failureKind, t.lastRequestID = "", ""
+	for _, header := range []string{"X-Request-ID", "Request-ID"} {
+		if id := response.Header.Get(header); diagnosticRequestID.MatchString(id) {
+			t.lastRequestID = id
+			break
+		}
+	}
 	if response.StatusCode >= 400 {
 		t.retryAfter = response.Header.Get("Retry-After")
 	}
