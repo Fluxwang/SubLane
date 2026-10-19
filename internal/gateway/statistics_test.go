@@ -312,3 +312,56 @@ func TestStatisticsRankKeysByReportedTokensWithinScope(t *testing.T) {
 		t.Fatal("expired key rows not reclaimed", rows, err)
 	}
 }
+
+func TestKeyLifetimeCostSurvivesRetentionAndStaysOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	// Rates are micro-USD per million tokens.
+	s.pricing = pricing.NewStatic(map[string]pricing.Price{"synthetic-priced": {Input: 2_000_000, Cached: 500_000, Output: 8_000_000}})
+	member := runtimeMember(t, s)
+	result, err := s.db.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at,revoked_at) VALUES(1,1,'synthetic','sl_fake',randomblob(32),1,2)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := result.LastInsertId()
+	value := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	now := s.now().Unix()
+	for _, record := range []db.RecordRequestParams{
+		{Model: "synthetic-priced", InputTokens: value(1_000_000), OutputTokens: value(100_000), CachedTokens: value(400_000), StartedAt: now},
+		// Without a cache split, differing rates make only this request's input price unknown.
+		{Model: "synthetic-priced", InputTokens: value(1_000), OutputTokens: value(0), StartedAt: now},
+		{Model: "synthetic-unpriced", InputTokens: value(300), OutputTokens: value(50), CachedTokens: value(0), StartedAt: now},
+		{Model: "synthetic-priced", InputTokens: value(0), OutputTokens: value(1_000_000), CachedTokens: value(0), StartedAt: now - 120*86400},
+		{Model: "synthetic-priced", InputTokens: value(5), OutputTokens: value(5), StartedAt: now},
+	} {
+		record.UserID, record.GroupID, record.KeyID, record.Provider, record.Outcome = 1, 1, key, "codex", "success"
+		if record.InputTokens != nil && *record.InputTokens == 5 {
+			record.KeyID = 0
+		}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneHistory(ctx, s.db, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := s.KeyUsage(ctx, 1, []int64{key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := usage.Keys[key]
+	if usage.TrackingSince <= 0 || got.EstimatedMicroUSD != 10_200_000 || got.UnpricedTokens != 1_350 || got.InputTokens != 1_001_300 || got.OutputTokens != 1_100_050 || got.Requests != 4 {
+		t.Fatal("inaccurate key lifetime cost", usage, got)
+	}
+	if other, err := s.KeyUsage(ctx, member, []int64{key}); err != nil || len(other.Keys) != 0 {
+		t.Fatal("key cost disclosed to another member", other, err)
+	}
+}

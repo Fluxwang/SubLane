@@ -101,8 +101,25 @@ function scenario(stage: SetupProgress['stage'], member = false) {
     }
     if (url.startsWith('/api/keys?'))
       return response({
-        keys: state.stage === 'key' ? [] : [key],
+        keys:
+          state.stage === 'key'
+            ? []
+            : [
+                {
+                  ...key,
+                  usage: {
+                    requests: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    input_reported: 0,
+                    output_reported: 0,
+                    estimated_micro_usd: 0,
+                    unpriced_tokens: 0,
+                  },
+                },
+              ],
         server_time: 1900000000,
+        key_tracking_since: 1900000000,
         next_cursor: 0,
         revoked_count: 0,
       })

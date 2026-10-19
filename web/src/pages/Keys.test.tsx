@@ -23,12 +23,26 @@ const metadata = {
   created_at: 1900000000,
   last_used_at: null,
   revoked_at: null as number | null,
+  usage: {
+    requests: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    input_reported: 0,
+    output_reported: 0,
+    estimated_micro_usd: 0,
+    unpriced_tokens: 0,
+  },
 }
 const response = (value: unknown) =>
   new Response(
     JSON.stringify(
       value && typeof value === 'object' && 'keys' in value
-        ? { server_time: 1900000000, revoked_count: 0, ...value }
+        ? {
+            server_time: 1900000000,
+            revoked_count: 0,
+            key_tracking_since: 1900000000,
+            ...value,
+          }
         : value,
     ),
   )
@@ -861,3 +875,72 @@ it.each([200, 401])(
     expect(screen.queryByDisplayValue(secret)).toBeNull()
   },
 )
+
+it("shows each key's lifetime estimated cost with tokens, small amounts, and unpriced usage", async () => {
+  const used = (usage: Partial<typeof metadata.usage>) => ({
+    ...metadata.usage,
+    requests: 1,
+    input_reported: 1,
+    output_reported: 1,
+    ...usage,
+  })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) =>
+      Promise.resolve(
+        response(
+          url === '/api/auth/state'
+            ? memberAuthenticated
+            : url === '/api/connection'
+              ? { status: 'ready' }
+              : {
+                  keys: [
+                    {
+                      ...metadata,
+                      id: 1,
+                      name: 'Synthetic busy',
+                      usage: used({
+                        input_tokens: 1_200_000,
+                        output_tokens: 34_000,
+                        estimated_micro_usd: 12_345_678,
+                        unpriced_tokens: 300,
+                      }),
+                    },
+                    {
+                      ...metadata,
+                      id: 2,
+                      name: 'Synthetic light',
+                      usage: used({
+                        input_tokens: 40,
+                        output_tokens: 2,
+                        estimated_micro_usd: 5_000,
+                      }),
+                    },
+                    { ...metadata, id: 3, name: 'Synthetic idle' },
+                  ],
+                  next_cursor: 0,
+                },
+        ),
+      ),
+    ),
+  )
+  open()
+  const table = await screen.findByRole('table')
+  expect(within(table).getByRole('columnheader', { name: 'Cost' })).toBeTruthy()
+  const row = (name: string) =>
+    within(table).getByText(name).closest('tr') as HTMLElement
+  expect(row('Synthetic busy').textContent).toContain('$12.35')
+  expect(row('Synthetic busy').textContent).toContain('1.2M tokens')
+  expect(
+    within(row('Synthetic busy')).getByRole('img', {
+      name: 'Some usage is for models without a price and is not included.',
+    }),
+  ).toBeTruthy()
+  expect(row('Synthetic light').textContent).toContain('< $0.01')
+  expect(within(row('Synthetic light')).queryByRole('img')).toBeNull()
+  expect(row('Synthetic idle').textContent).toContain('—')
+  expect(
+    screen.getByText(/Costs are estimated with current prices since/)
+      .textContent,
+  ).toContain('2030')
+})

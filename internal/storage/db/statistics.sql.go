@@ -7,7 +7,27 @@ package db
 
 import (
 	"context"
+	"strings"
 )
+
+const canTrackKeyModel = `-- name: CanTrackKeyModel :one
+SELECT CAST(
+ EXISTS(SELECT 1 FROM usage_lifetime_keys known WHERE known.key_id=?1 AND known.model=?2)
+ OR (SELECT COUNT(*) FROM usage_lifetime_keys tracked WHERE tracked.key_id=?1 AND tracked.model!='[other models]')<64
+AS INTEGER)
+`
+
+type CanTrackKeyModelParams struct {
+	KeyID int64
+	Model string
+}
+
+func (q *Queries) CanTrackKeyModel(ctx context.Context, arg CanTrackKeyModelParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, canTrackKeyModel, arg.KeyID, arg.Model)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
 
 const canTrackStatisticsModel = `-- name: CanTrackStatisticsModel :one
 SELECT CAST(
@@ -126,6 +146,63 @@ func (q *Queries) GetStatisticsTotals(ctx context.Context, arg GetStatisticsTota
 		&i.CachedReported,
 	)
 	return i, err
+}
+
+const listKeyLifetimeUsage = `-- name: ListKeyLifetimeUsage :many
+SELECT l.key_id,l.model,l.requests,l.input_tokens,l.output_tokens,l.cached_tokens,l.unsplit_input_tokens,l.input_reported,l.output_reported
+FROM usage_lifetime_keys l JOIN api_keys k ON k.id=l.key_id JOIN account_groups g ON g.id=k.group_id
+WHERE k.user_id=?1 AND g.tenant_id=?2 AND l.key_id IN (/*SLICE:key_ids*/?)
+`
+
+type ListKeyLifetimeUsageParams struct {
+	UserID   int64
+	TenantID int64
+	KeyIds   []int64
+}
+
+func (q *Queries) ListKeyLifetimeUsage(ctx context.Context, arg ListKeyLifetimeUsageParams) ([]UsageLifetimeKey, error) {
+	query := listKeyLifetimeUsage
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.UserID)
+	queryParams = append(queryParams, arg.TenantID)
+	if len(arg.KeyIds) > 0 {
+		for _, v := range arg.KeyIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:key_ids*/?", strings.Repeat(",?", len(arg.KeyIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:key_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageLifetimeKey{}
+	for rows.Next() {
+		var i UsageLifetimeKey
+		if err := rows.Scan(
+			&i.KeyID,
+			&i.Model,
+			&i.Requests,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.UnsplitInputTokens,
+			&i.InputReported,
+			&i.OutputReported,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listKeyStatistics = `-- name: ListKeyStatistics :many
@@ -388,6 +465,46 @@ func (q *Queries) PruneStatistics(ctx context.Context, beforeDay int64) (int64, 
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const recordKeyLifetimeUsage = `-- name: RecordKeyLifetimeUsage :exec
+INSERT INTO usage_lifetime_keys(key_id,model,requests,input_tokens,output_tokens,cached_tokens,unsplit_input_tokens,input_reported,output_reported)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+ON CONFLICT(key_id,model) DO UPDATE SET
+requests=usage_lifetime_keys.requests+excluded.requests,
+input_tokens=usage_lifetime_keys.input_tokens+excluded.input_tokens,
+output_tokens=usage_lifetime_keys.output_tokens+excluded.output_tokens,
+cached_tokens=usage_lifetime_keys.cached_tokens+excluded.cached_tokens,
+unsplit_input_tokens=usage_lifetime_keys.unsplit_input_tokens+excluded.unsplit_input_tokens,
+input_reported=usage_lifetime_keys.input_reported+excluded.input_reported,
+output_reported=usage_lifetime_keys.output_reported+excluded.output_reported
+`
+
+type RecordKeyLifetimeUsageParams struct {
+	KeyID              int64
+	Model              string
+	Requests           int64
+	InputTokens        int64
+	OutputTokens       int64
+	CachedTokens       int64
+	UnsplitInputTokens int64
+	InputReported      int64
+	OutputReported     int64
+}
+
+func (q *Queries) RecordKeyLifetimeUsage(ctx context.Context, arg RecordKeyLifetimeUsageParams) error {
+	_, err := q.db.ExecContext(ctx, recordKeyLifetimeUsage,
+		arg.KeyID,
+		arg.Model,
+		arg.Requests,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedTokens,
+		arg.UnsplitInputTokens,
+		arg.InputReported,
+		arg.OutputReported,
+	)
+	return err
 }
 
 const recordKeyStatistics = `-- name: RecordKeyStatistics :exec

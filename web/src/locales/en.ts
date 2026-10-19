@@ -1125,6 +1125,11 @@ export const en = {
   noUsableKeys: 'No usable keys ({{count}} revoked)',
   noUsableKeysDescription:
     'Show your revoked keys to view them, or create a new key.',
+  keyCost: 'Cost',
+  keyCostNote: 'Costs are estimated with current prices since {{date}}.',
+  keyCostUnpriced:
+    'Some usage is for models without a price and is not included.',
+  keyLifetimeTokens: '{{value}} tokens',
   keyLastUsed: 'Last used',
   neverUsed: 'Never',
   revoked: 'Revoked',

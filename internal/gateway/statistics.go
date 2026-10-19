@@ -192,23 +192,12 @@ func (s *Service) estimateCost(ctx context.Context, q *db.Queries, userID int64,
 	// Sum exact products per day before rounding; long periods can exceed per-request cost bounds.
 	sums := make(map[int64]*big.Int, len(days))
 	for _, row := range rows {
-		price, ok := pricing.Price{}, false
-		if s.pricing != nil {
-			price, ok = s.pricing.Lookup(row.Model)
-		}
-		// Overflow labels and partially reported cache splits cannot be priced when rates differ.
-		if !ok || (row.CachedReported < row.InputReported && price.Input != price.Cached) || row.CachedTokens > row.InputTokens {
-			summary.UnpricedTokens += row.InputTokens + row.OutputTokens
-			continue
-		}
 		sum := sums[row.Day]
 		if sum == nil {
 			sum = new(big.Int)
 			sums[row.Day] = sum
 		}
-		for _, v := range [][2]int64{{row.InputTokens - row.CachedTokens, price.Input}, {row.CachedTokens, price.Cached}, {row.OutputTokens, price.Output}} {
-			sum.Add(sum, new(big.Int).Mul(big.NewInt(v[0]), big.NewInt(v[1])))
-		}
+		summary.UnpricedTokens += s.addCost(sum, costBasis{Model: row.Model, InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, CachedTokens: row.CachedTokens, InputReported: row.InputReported, CachedReported: row.CachedReported})
 	}
 	for _, day := range days {
 		cost := DayCost{ID: day.ID}
@@ -217,13 +206,123 @@ func (s *Service) estimateCost(ctx context.Context, q *db.Queries, userID int64,
 			return summary, err
 		}
 		if sum := sums[id]; sum != nil {
-			rounded := new(big.Int).Add(sum, big.NewInt(999_999))
-			cost.EstimatedMicroUSD = rounded.Div(rounded, big.NewInt(1_000_000)).Int64()
+			cost.EstimatedMicroUSD = microUSD(sum)
 		}
 		summary.EstimatedMicroUSD += cost.EstimatedMicroUSD
 		summary.Days = append(summary.Days, cost)
 	}
 	return summary, nil
+}
+
+// KeyUsage is a key's lifetime usage since key tracking began, priced with the current catalog.
+type KeyUsage struct {
+	Requests          int64 `json:"requests"`
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	InputReported     int64 `json:"input_reported"`
+	OutputReported    int64 `json:"output_reported"`
+	EstimatedMicroUSD int64 `json:"estimated_micro_usd"`
+	UnpricedTokens    int64 `json:"unpriced_tokens"`
+}
+type KeyUsageSummary struct {
+	TrackingSince int64
+	Keys          map[int64]KeyUsage
+}
+
+// KeyUsage returns lifetime usage only for the listed keys that userID owns in this workspace.
+func (s *Service) KeyUsage(ctx context.Context, userID int64, keyIDs []int64) (KeyUsageSummary, error) {
+	summary := KeyUsageSummary{Keys: map[int64]KeyUsage{}}
+	if userID <= 0 {
+		return summary, accounts.ErrInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return summary, err
+	}
+	defer tx.Rollback()
+	q := s.queries.WithTx(tx)
+	coverage, err := q.GetKeyStatisticsCoverage(ctx)
+	if err != nil {
+		return summary, err
+	}
+	if summary.TrackingSince, err = strconv.ParseInt(coverage, 10, 64); err != nil {
+		return summary, err
+	}
+	if len(keyIDs) == 0 {
+		return summary, tx.Commit()
+	}
+	rows, err := q.ListKeyLifetimeUsage(ctx, db.ListKeyLifetimeUsageParams{UserID: userID, TenantID: s.tenantID, KeyIds: keyIDs})
+	if err != nil {
+		return summary, err
+	}
+	sums := map[int64]*big.Int{}
+	for _, row := range rows {
+		usage := summary.Keys[row.KeyID]
+		usage.Requests += row.Requests
+		usage.InputTokens += row.InputTokens
+		usage.OutputTokens += row.OutputTokens
+		usage.InputReported += row.InputReported
+		usage.OutputReported += row.OutputReported
+		sum := sums[row.KeyID]
+		if sum == nil {
+			sum = new(big.Int)
+			sums[row.KeyID] = sum
+		}
+		// Price requests with a cache split exactly; input without one is priceable only when rates match.
+		usage.UnpricedTokens += s.addCost(sum, costBasis{Model: row.Model, InputTokens: row.InputTokens - row.UnsplitInputTokens, OutputTokens: row.OutputTokens, CachedTokens: row.CachedTokens})
+		usage.UnpricedTokens += s.addCost(sum, costBasis{Model: row.Model, InputTokens: row.UnsplitInputTokens, InputReported: 1})
+		summary.Keys[row.KeyID] = usage
+	}
+	for id, sum := range sums {
+		usage := summary.Keys[id]
+		usage.EstimatedMicroUSD = microUSD(sum)
+		summary.Keys[id] = usage
+	}
+	return summary, tx.Commit()
+}
+
+type costBasis struct {
+	Model                                   string
+	InputTokens, OutputTokens, CachedTokens int64
+	InputReported, CachedReported           int64
+}
+
+// addCost adds the row's unrounded current-catalog cost to sum and returns its unpriced tokens.
+func (s *Service) addCost(sum *big.Int, row costBasis) int64 {
+	price, ok := pricing.Price{}, false
+	if s.pricing != nil {
+		price, ok = s.pricing.Lookup(row.Model)
+	}
+	// Overflow labels and partially reported cache splits cannot be priced when rates differ.
+	if !ok || (row.CachedReported < row.InputReported && price.Input != price.Cached) || row.CachedTokens > row.InputTokens {
+		return row.InputTokens + row.OutputTokens
+	}
+	for _, v := range [][2]int64{{row.InputTokens - row.CachedTokens, price.Input}, {row.CachedTokens, price.Cached}, {row.OutputTokens, price.Output}} {
+		sum.Add(sum, new(big.Int).Mul(big.NewInt(v[0]), big.NewInt(v[1])))
+	}
+	return 0
+}
+
+// microUSD rounds an exact sum up so that any priced usage is never shown as free.
+func microUSD(sum *big.Int) int64 {
+	rounded := new(big.Int).Add(sum, big.NewInt(999_999))
+	return rounded.Div(rounded, big.NewInt(1_000_000)).Int64()
+}
+
+func recordKeyLifetimeUsage(ctx context.Context, q *db.Queries, keyID int64, model string, entry db.RecordStatisticsParams) error {
+	// Lifetime rows are never pruned, so each key keeps its own bound on model labels.
+	tracked, err := q.CanTrackKeyModel(ctx, db.CanTrackKeyModelParams{KeyID: keyID, Model: model})
+	if err != nil {
+		return err
+	}
+	if tracked == 0 {
+		model = "[other models]"
+	}
+	usage := db.RecordKeyLifetimeUsageParams{KeyID: keyID, Model: model, Requests: entry.Requests, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, CachedTokens: entry.CachedTokens, InputReported: entry.InputReported, OutputReported: entry.OutputReported}
+	if entry.InputReported == 1 && entry.CachedReported == 0 {
+		usage.UnsplitInputTokens = entry.InputTokens
+	}
+	return q.RecordKeyLifetimeUsage(ctx, usage)
 }
 
 func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestParams) error {
@@ -276,6 +375,9 @@ func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestPara
 	}
 	if r.KeyID > 0 {
 		if err := q.RecordKeyStatistics(ctx, db.RecordKeyStatisticsParams{Day: entry.Day, KeyID: r.KeyID, Requests: entry.Requests, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, CachedTokens: entry.CachedTokens, InputReported: entry.InputReported, OutputReported: entry.OutputReported, CachedReported: entry.CachedReported}); err != nil {
+			return err
+		}
+		if err := recordKeyLifetimeUsage(ctx, q, r.KeyID, model, entry); err != nil {
 			return err
 		}
 	}

@@ -113,6 +113,10 @@ func seed(ctx context.Context, connection *sql.DB, identity *auth.Service, accou
 				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported, CachedReported: metrics.CachedReported}); err != nil {
 				return err
 			}
+			if err := q.RecordKeyLifetimeUsage(ctx, db.RecordKeyLifetimeUsageParams{KeyID: record.KeyID, Model: model, Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens,
+				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported}); err != nil {
+				return err
+			}
 			if err := q.RecordHourlyUsage(ctx, db.RecordHourlyUsageParams{GroupID: groupID, Hour: at.Truncate(time.Hour).Unix(), UserID: record.UserID,
 				Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported}); err != nil {
 				return err

@@ -112,3 +112,26 @@ CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
 FROM usage_daily_keys s JOIN api_keys k ON k.id=s.key_id JOIN account_groups g ON g.id=k.group_id LEFT JOIN users u ON u.id=k.user_id
 WHERE g.tenant_id=sqlc.arg(tenant_id) AND s.day>=sqlc.arg(from_day) AND s.day<sqlc.arg(to_day) AND (k.user_id=sqlc.arg(user_id) OR sqlc.arg(user_id)=0)
 GROUP BY k.id ORDER BY SUM(s.input_tokens+s.output_tokens) DESC,requests DESC,k.id ASC LIMIT 20;
+
+-- name: CanTrackKeyModel :one
+SELECT CAST(
+ EXISTS(SELECT 1 FROM usage_lifetime_keys known WHERE known.key_id=sqlc.arg(key_id) AND known.model=sqlc.arg(model))
+ OR (SELECT COUNT(*) FROM usage_lifetime_keys tracked WHERE tracked.key_id=sqlc.arg(key_id) AND tracked.model!='[other models]')<64
+AS INTEGER);
+
+-- name: RecordKeyLifetimeUsage :exec
+INSERT INTO usage_lifetime_keys(key_id,model,requests,input_tokens,output_tokens,cached_tokens,unsplit_input_tokens,input_reported,output_reported)
+VALUES(sqlc.arg(key_id),sqlc.arg(model),sqlc.arg(requests),sqlc.arg(input_tokens),sqlc.arg(output_tokens),sqlc.arg(cached_tokens),sqlc.arg(unsplit_input_tokens),sqlc.arg(input_reported),sqlc.arg(output_reported))
+ON CONFLICT(key_id,model) DO UPDATE SET
+requests=usage_lifetime_keys.requests+excluded.requests,
+input_tokens=usage_lifetime_keys.input_tokens+excluded.input_tokens,
+output_tokens=usage_lifetime_keys.output_tokens+excluded.output_tokens,
+cached_tokens=usage_lifetime_keys.cached_tokens+excluded.cached_tokens,
+unsplit_input_tokens=usage_lifetime_keys.unsplit_input_tokens+excluded.unsplit_input_tokens,
+input_reported=usage_lifetime_keys.input_reported+excluded.input_reported,
+output_reported=usage_lifetime_keys.output_reported+excluded.output_reported;
+
+-- name: ListKeyLifetimeUsage :many
+SELECT l.key_id,l.model,l.requests,l.input_tokens,l.output_tokens,l.cached_tokens,l.unsplit_input_tokens,l.input_reported,l.output_reported
+FROM usage_lifetime_keys l JOIN api_keys k ON k.id=l.key_id JOIN account_groups g ON g.id=k.group_id
+WHERE k.user_id=sqlc.arg(user_id) AND g.tenant_id=sqlc.arg(tenant_id) AND l.key_id IN (sqlc.slice(key_ids));
