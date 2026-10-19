@@ -1,5 +1,12 @@
+import { Pagination } from '@/components/Pagination'
+import { TableViewport } from '@/components/TableViewport'
+import { useTablePagination } from '@/lib/pagination'
 import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { KeyRound, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
@@ -27,12 +34,15 @@ function KeyManager({ userID }: { userID: number }) {
   const timeZone = useTimeZone()
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
-  const [cursors, setCursors] = useState([0])
+  const { page, pageSize, viewport, changePage, changePageSize, syncPage } =
+    useTablePagination()
   const [includeRevoked, setIncludeRevoked] = useState(false)
   const [revokedName, setRevokedName] = useState('')
-  const query = useQuery(
-    keyOptions(client, userID, cursors[cursors.length - 1], includeRevoked),
-  )
+  const query = useQuery({
+    ...keyOptions(client, userID, page, includeRevoked, pageSize),
+    placeholderData: keepPreviousData,
+  })
+  syncPage(query.data?.page, query.isPlaceholderData)
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000)
@@ -53,7 +63,7 @@ function KeyManager({ userID }: { userID: number }) {
     dateStyle: 'medium',
   })
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 ref={heading} tabIndex={-1} className="page-title outline-none">
@@ -66,7 +76,7 @@ function KeyManager({ userID }: { userID: number }) {
             userID={userID}
             onCreated={() => {
               setRevokedName('')
-              setCursors([0])
+              changePage(1)
               return invalidate()
             }}
           />
@@ -88,7 +98,7 @@ function KeyManager({ userID }: { userID: number }) {
             checked={includeRevoked}
             onChange={(event) => {
               setIncludeRevoked(event.target.checked)
-              setCursors([0])
+              changePage(1)
             }}
           />
           <span
@@ -146,7 +156,7 @@ function KeyManager({ userID }: { userID: number }) {
           </p>
         </section>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <TableViewport ref={viewport} aria-busy={query.isFetching}>
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-muted-foreground">
               <tr>
@@ -243,8 +253,8 @@ function KeyManager({ userID }: { userID: number }) {
                         value={key}
                         onRevoked={() => {
                           setRevokedName(key.name)
-                          // Revocation can empty the last page, so discard cursors into the old list.
-                          setCursors([0])
+                          // Keep the remaining usable keys visible after removing a row.
+                          changePage(1)
                           return invalidate()
                         }}
                         focusAfterRevoke={() => heading.current?.focus()}
@@ -255,27 +265,17 @@ function KeyManager({ userID }: { userID: number }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
-      {query.data && (cursors.length > 1 || query.data.next_cursor !== 0) && (
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            disabled={cursors.length === 1 || query.isFetching}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
-          >
-            {t('previousPage')}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!query.data.next_cursor || query.isFetching}
-            onClick={() =>
-              setCursors((value) => [...value, query.data.next_cursor])
-            }
-          >
-            {t('nextPage')}
-          </Button>
-        </div>
+      {query.data && (
+        <Pagination
+          page={query.data.page}
+          pageSize={query.data.page_size}
+          total={query.data.total}
+          disabled={query.isFetching}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
       )}
     </div>
   )

@@ -75,7 +75,7 @@ func (h *accountHTTP) requestHistory(w http.ResponseWriter, r *http.Request, per
 	}
 	values := r.URL.Query()
 	filter := gateway.RequestFilter{AccountID: values.Get("account_id"), Outcome: values.Get("outcome"), Model: values.Get("model"), RequestID: values.Get("request_id")}
-	numeric := map[string]*int64{"cursor": &filter.Cursor, "from": &filter.From, "until": &filter.Until, "key_id": &filter.KeyID}
+	numeric := map[string]*int64{"cursor": &filter.Cursor, "page": &filter.Page, "limit": &filter.Limit, "from": &filter.From, "until": &filter.Until, "key_id": &filter.KeyID}
 	if !personal {
 		numeric["user_id"] = &filter.MemberID
 	}

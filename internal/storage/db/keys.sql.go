@@ -52,6 +52,25 @@ func (q *Queries) CountActiveKeys(ctx context.Context, arg CountActiveKeysParams
 	return count, err
 }
 
+const countKeys = `-- name: CountKeys :one
+SELECT COUNT(*) FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.user_id
+WHERE k.user_id=?1 AND g.tenant_id=?2
+AND (k.revoked_at IS NULL OR CAST(?3 AS BOOLEAN))
+`
+
+type CountKeysParams struct {
+	UserID         int64
+	TenantID       int64
+	IncludeRevoked bool
+}
+
+func (q *Queries) CountKeys(ctx context.Context, arg CountKeysParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countKeys, arg.UserID, arg.TenantID, arg.IncludeRevoked)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createKey = `-- name: CreateKey :execlastid
 INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at,expires_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7)
@@ -208,7 +227,7 @@ FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.
 WHERE k.user_id=?1 AND g.tenant_id=?2
 AND (k.revoked_at IS NULL OR CAST(?3 AS BOOLEAN))
 AND (k.id<?4 OR ?4=0)
-ORDER BY k.id DESC LIMIT 51
+ORDER BY k.id DESC LIMIT ?6 OFFSET ?5
 `
 
 type ListKeysParams struct {
@@ -216,6 +235,8 @@ type ListKeysParams struct {
 	TenantID       int64
 	IncludeRevoked bool
 	BeforeID       int64
+	PageOffset     int64
+	PageLimit      int64
 }
 
 type ListKeysRow struct {
@@ -241,6 +262,8 @@ func (q *Queries) ListKeys(ctx context.Context, arg ListKeysParams) ([]ListKeysR
 		arg.TenantID,
 		arg.IncludeRevoked,
 		arg.BeforeID,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

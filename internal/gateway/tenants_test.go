@@ -105,7 +105,7 @@ func TestRequestHistoryDoesNotCrossWorkspaces(t *testing.T) {
 		poolID  int64
 	}{{first, firstPool.ID}, {second, otherPool.ID}} {
 		page, err := check.service.UserRequests(ctx, member.ID, RequestFilter{})
-		if err != nil || len(page.Requests) != 1 || page.Requests[0].GroupID != check.poolID {
+		if err != nil || len(page.Requests) != 1 || page.Total != 1 || page.Requests[0].GroupID != check.poolID {
 			t.Fatalf("request history leaked across workspaces: %+v, %v", page, err)
 		}
 	}

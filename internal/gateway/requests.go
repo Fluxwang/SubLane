@@ -8,6 +8,7 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/content"
+	"github.com/murongg/SubLane/internal/pagination"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -40,12 +41,14 @@ type RequestRecord struct {
 	Content               *content.Result `json:"content,omitempty"`
 }
 type RequestPage struct {
+	pagination.Metadata
 	Requests   []RequestRecord `json:"requests"`
 	NextCursor int64           `json:"next_cursor"`
 }
 
 type RequestFilter struct {
 	Cursor                               int64
+	Page, Limit                          int64
 	AccountID, Outcome, Model, RequestID string
 	From, Until, KeyID, MemberID         int64
 }
@@ -64,7 +67,8 @@ func (s *Service) UserRequests(ctx context.Context, userID int64, filter Request
 }
 func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (RequestPage, error) {
 	page := RequestPage{Requests: []RequestRecord{}}
-	if f.Cursor < 0 || len(f.AccountID) > 64 || f.KeyID < 0 || f.MemberID < 0 || f.From < 0 || f.Until < 0 || (f.Until != 0 && f.From >= f.Until) || (f.Model != "" && !safeModel.MatchString(f.Model)) || (f.RequestID != "" && !safeRequestID.MatchString(f.RequestID)) {
+	bounds := pagination.Input{Page: f.Page, Limit: f.Limit, Cursor: f.Cursor}
+	if !bounds.Valid() || len(f.AccountID) > 64 || f.KeyID < 0 || f.MemberID < 0 || f.From < 0 || f.Until < 0 || (f.Until != 0 && f.From >= f.Until) || (f.Model != "" && !safeModel.MatchString(f.Model)) || (f.RequestID != "" && !safeRequestID.MatchString(f.RequestID)) {
 		return page, accounts.ErrInput
 	}
 	switch f.Outcome {
@@ -73,9 +77,29 @@ func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (
 		return page, accounts.ErrInput
 	}
 	since := s.now().Add(-7 * 24 * time.Hour).Unix()
-	rows, err := s.queries.ListRequests(ctx, db.ListRequestsParams{TenantID: s.tenantID, UserID: userID, Cursor: f.Cursor, AccountID: f.AccountID, Outcome: f.Outcome, Since: max(since, f.From), UntilTime: f.Until, MemberID: f.MemberID, KeyID: f.KeyID, Model: f.Model, RequestID: f.RequestID})
+	// Count and rows must describe one snapshot, including after retention prunes the last page.
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return page, err
+	}
+	defer tx.Rollback()
+	q := s.queries.WithTx(tx)
+	page.Total, err = q.CountRequests(ctx, db.CountRequestsParams{TenantID: s.tenantID, UserID: userID, AccountID: f.AccountID, Outcome: f.Outcome, Since: max(since, f.From), UntilTime: f.Until, MemberID: f.MemberID, KeyID: f.KeyID, Model: f.Model, RequestID: f.RequestID})
+	if err != nil {
+		return page, err
+	}
+	page.Metadata = bounds.Resolve(page.Total)
+	offset := page.Offset()
+	rows, err := q.ListRequests(ctx, db.ListRequestsParams{TenantID: s.tenantID, UserID: userID, Cursor: f.Cursor, AccountID: f.AccountID, Outcome: f.Outcome, Since: max(since, f.From), UntilTime: f.Until, MemberID: f.MemberID, KeyID: f.KeyID, Model: f.Model, RequestID: f.RequestID, PageLimit: page.PageSize + 1, PageOffset: offset})
+	if err != nil {
+		return page, err
+	}
+	if err := tx.Commit(); err != nil {
+		return page, err
+	}
+	if int64(len(rows)) > page.PageSize {
+		rows = rows[:page.PageSize]
+		page.NextCursor = rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
 		record := RequestRecord{
@@ -100,10 +124,6 @@ func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (
 			record.Content = &result
 		}
 		page.Requests = append(page.Requests, record)
-	}
-	if len(page.Requests) > 50 {
-		page.Requests = page.Requests[:50]
-		page.NextCursor = page.Requests[49].ID
 	}
 	return page, nil
 }

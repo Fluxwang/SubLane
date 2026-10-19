@@ -32,7 +32,12 @@ FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.
 WHERE k.user_id=sqlc.arg(user_id) AND g.tenant_id=sqlc.arg(tenant_id)
 AND (k.revoked_at IS NULL OR CAST(sqlc.arg(include_revoked) AS BOOLEAN))
 AND (k.id<sqlc.arg(before_id) OR sqlc.arg(before_id)=0)
-ORDER BY k.id DESC LIMIT 51;
+ORDER BY k.id DESC LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountKeys :one
+SELECT COUNT(*) FROM api_keys k JOIN account_groups g ON g.id=k.group_id JOIN users u ON u.id=k.user_id
+WHERE k.user_id=sqlc.arg(user_id) AND g.tenant_id=sqlc.arg(tenant_id)
+AND (k.revoked_at IS NULL OR CAST(sqlc.arg(include_revoked) AS BOOLEAN));
 
 -- name: GetKey :one
 SELECT k.id,k.group_id,g.name AS group_name,

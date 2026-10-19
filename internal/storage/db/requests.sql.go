@@ -9,6 +9,52 @@ import (
 	"context"
 )
 
+const countRequests = `-- name: CountRequests :one
+SELECT COUNT(*) FROM request_records r JOIN account_groups g ON g.id=r.group_id
+WHERE g.tenant_id=?1
+ AND (r.user_id=?2 OR ?2=0)
+ AND (r.account_id=?3 OR ?3='')
+ AND (r.outcome=?4 OR ?4='')
+ AND r.started_at>=?5
+ AND (r.started_at<?6 OR ?6=0)
+ AND (r.user_id=?7 OR ?7=0)
+ AND (r.key_id=?8 OR ?8=0)
+ AND (r.model=?9 OR ?9='')
+ AND (r.request_id=?10 OR ?10='')
+`
+
+type CountRequestsParams struct {
+	TenantID  int64
+	UserID    int64
+	AccountID string
+	Outcome   string
+	Since     int64
+	UntilTime int64
+	MemberID  int64
+	KeyID     int64
+	Model     string
+	RequestID string
+}
+
+// Match ListRequests filters before pagination so totals never escape the caller's scope.
+func (q *Queries) CountRequests(ctx context.Context, arg CountRequestsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRequests,
+		arg.TenantID,
+		arg.UserID,
+		arg.AccountID,
+		arg.Outcome,
+		arg.Since,
+		arg.UntilTime,
+		arg.MemberID,
+		arg.KeyID,
+		arg.Model,
+		arg.RequestID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const listRequestCallers = `-- name: ListRequestCallers :many
 SELECT r.user_id, r.key_id, COALESCE(u.username,'') AS username, COALESCE(k.name,'') AS key_name
 FROM request_records r
@@ -71,21 +117,23 @@ WHERE g.tenant_id=?1
  AND (r.key_id=?9 OR ?9=0)
  AND (r.model=?10 OR ?10='')
  AND (r.request_id=?11 OR ?11='')
-ORDER BY r.id DESC LIMIT 51
+ORDER BY r.id DESC LIMIT ?13 OFFSET ?12
 `
 
 type ListRequestsParams struct {
-	TenantID  int64
-	UserID    int64
-	Cursor    int64
-	AccountID string
-	Outcome   string
-	Since     int64
-	UntilTime int64
-	MemberID  int64
-	KeyID     int64
-	Model     string
-	RequestID string
+	TenantID   int64
+	UserID     int64
+	Cursor     int64
+	AccountID  string
+	Outcome    string
+	Since      int64
+	UntilTime  int64
+	MemberID   int64
+	KeyID      int64
+	Model      string
+	RequestID  string
+	PageOffset int64
+	PageLimit  int64
 }
 
 type ListRequestsRow struct {
@@ -132,6 +180,8 @@ func (q *Queries) ListRequests(ctx context.Context, arg ListRequestsParams) ([]L
 		arg.KeyID,
 		arg.Model,
 		arg.RequestID,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

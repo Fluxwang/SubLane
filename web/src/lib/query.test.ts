@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest'
 import { QueryObserver } from '@tanstack/react-query'
 import { requestOptions } from './requests'
+import { auditOptions } from './audit'
+import { memberOptions } from './members'
 import { statisticsOptions } from './statistics'
 import { authKey, authOptions } from './auth'
 import { createQueryClient } from './query'
@@ -11,18 +13,68 @@ import {
   hourlyActivity,
 } from '@/test/fixtures'
 
+it.each(['audit', 'members'] as const)(
+  'does not seed a clamped %s page after switching administrators',
+  async (kind) => {
+    const client = createQueryClient()
+    client.setQueryData(authKey, authenticated)
+    let complete!: (response: Response) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            complete = resolve
+          }),
+      ),
+    )
+    const pending =
+      kind === 'audit'
+        ? client.fetchQuery(auditOptions(client, 4, '', ''))
+        : client.fetchQuery(memberOptions(client, 4, 50))
+    client.setQueryData(authKey, {
+      ...authenticated,
+      user: { ...authenticated.user, id: 99 },
+    })
+    complete(
+      new Response(
+        JSON.stringify({
+          [kind === 'audit' ? 'events' : 'members']: [],
+          total: 0,
+          page: 1,
+          page_size: 50,
+          next_cursor: 0,
+        }),
+      ),
+    )
+    await pending
+    const destination =
+      kind === 'audit'
+        ? auditOptions(client, 1, '', '')
+        : memberOptions(client, 1, 50)
+    expect(client.getQueryData(destination.queryKey)).toBeUndefined()
+    client.clear()
+  },
+)
+
 it.each(['personal', 'all'] as const)(
   'stops a mounted %s history observer when the active identity changes',
   async (scope) => {
     const client = createQueryClient()
     client.setQueryData(authKey, authenticated)
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ requests: [], next_cursor: 0 })),
-      )
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          requests: [],
+          next_cursor: 0,
+          total: 0,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+    )
     vi.stubGlobal('fetch', fetch)
-    const options = requestOptions(client, authenticated.user.id, scope, 0, {})
+    const options = requestOptions(client, authenticated.user.id, scope, 1, {})
     await client.fetchQuery(options)
     const observer = new QueryObserver(client, options)
     const unsubscribe = observer.subscribe(() => {})

@@ -1,5 +1,9 @@
 import { useId, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   ChevronDown,
   LoaderCircle,
@@ -24,6 +28,9 @@ import { RequestFilterForm } from '@/components/RequestFilters'
 import { RequestID } from '@/components/RequestID'
 import { RequestDetails } from '@/components/RequestDetails'
 import { Status } from '@/components/Status'
+import { Pagination } from '@/components/Pagination'
+import { TableViewport } from '@/components/TableViewport'
+import { useTablePagination } from '@/lib/pagination'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,7 +68,8 @@ function RequestTable({
   const timeZone = useTimeZone()
   const client = useQueryClient()
   const personal = scope === 'personal'
-  const [cursors, setCursors] = useState([0])
+  const { page, pageSize, viewport, changePage, changePageSize, syncPage } =
+    useTablePagination()
   const [filters, setFilters] = useState<RequestFilters>({})
   const [expanded, setExpanded] = useState(false)
   const [selected, setSelected] = useState<RequestRecord | null>(null)
@@ -71,14 +79,16 @@ function RequestTable({
   const outcome = filters.outcome ?? ''
   const apply = (value: RequestFilters) => {
     setFilters(value)
-    setCursors([0])
+    changePage(1)
   }
   const active = Object.values(filters).some(
     (value) => value !== undefined && value !== '',
   )
-  const query = useQuery(
-    requestOptions(client, userID, scope, cursors[cursors.length - 1], filters),
-  )
+  const query = useQuery({
+    ...requestOptions(client, userID, scope, page, filters, pageSize),
+    placeholderData: keepPreviousData,
+  })
+  syncPage(query.data?.page, query.isPlaceholderData)
   const accounts = useQuery({
     ...accountOptions,
     enabled: () =>
@@ -105,7 +115,7 @@ function RequestTable({
     return rate === null ? '—' : percentages.format(rate)
   }
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="page-title">
@@ -244,9 +254,9 @@ function RequestTable({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <TableViewport ref={viewport} aria-busy={query.isFetching}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-border text-muted-foreground">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-muted-foreground">
               <tr>
                 {(
                   [
@@ -419,7 +429,7 @@ function RequestTable({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
       <RequestDetails
         key={selected?.id ?? 'closed'}
@@ -427,25 +437,15 @@ function RequestTable({
         onClose={() => setSelected(null)}
         onRestoreFocus={() => detailTrigger.current?.focus()}
       />
-      {query.data && (cursors.length > 1 || query.data.next_cursor !== 0) && (
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            disabled={cursors.length === 1 || query.isFetching}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
-          >
-            {t('previousPage')}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!query.data.next_cursor || query.isFetching}
-            onClick={() =>
-              setCursors((value) => [...value, query.data.next_cursor])
-            }
-          >
-            {t('nextPage')}
-          </Button>
-        </div>
+      {query.data && (
+        <Pagination
+          page={query.data.page}
+          pageSize={query.data.page_size}
+          total={query.data.total}
+          disabled={query.isFetching}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
       )}
     </div>
   )

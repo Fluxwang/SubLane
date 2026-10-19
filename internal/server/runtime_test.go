@@ -113,6 +113,49 @@ func TestPersonalRequestsEnforceOwnershipBeforePagination(t *testing.T) {
 	if page := read("/api/requests", ownerCookie); len(page.Requests) != 50 || page.Requests[0].AccountID != "private-subscription" {
 		t.Fatal("administrator history lost operator details")
 	}
+	for _, tc := range []struct {
+		path                    string
+		cookie                  *http.Cookie
+		total, page, size, rows int64
+	}{
+		{"/api/me/requests", memberCookie, 60, 1, 50, 50},
+		{"/api/me/requests?page=3&limit=25", memberCookie, 60, 3, 25, 10},
+		{"/api/me/requests?page=999&limit=25", memberCookie, 60, 3, 25, 10},
+		{fmt.Sprintf("/api/me/requests?page=2&limit=25&user_id=%d&account_id=private-subscription", other.ID), memberCookie, 60, 2, 25, 25},
+		{"/api/me/requests?outcome=error&page=4&limit=10", memberCookie, 0, 1, 10, 0},
+		{"/api/me/requests", ownerCookie, 0, 1, 50, 0},
+		{"/api/requests?page=2&limit=100", ownerCookie, 120, 2, 100, 20},
+		{"/api/requests?limit=100", ownerCookie, 120, 1, 100, 100},
+		{"/api/requests?outcome=error&page=3&limit=25", ownerCookie, 60, 3, 25, 10},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			result := request(h, "GET", tc.path, "", nil, tc.cookie)
+			var page struct {
+				Requests []gateway.RequestRecord `json:"requests"`
+				Total    int64                   `json:"total"`
+				Page     int64                   `json:"page"`
+				PageSize int64                   `json:"page_size"`
+			}
+			if result.Code != 200 || json.Unmarshal(result.Body.Bytes(), &page) != nil {
+				t.Fatalf("history status=%d body=%s", result.Code, result.Body.String())
+			}
+			if page.Total != tc.total || page.Page != tc.page || page.PageSize != tc.size || int64(len(page.Requests)) != tc.rows {
+				t.Fatalf("pagination total=%d page=%d size=%d rows=%d, want %d/%d/%d/%d", page.Total, page.Page, page.PageSize, len(page.Requests), tc.total, tc.page, tc.size, tc.rows)
+			}
+			if tc.cookie == memberCookie {
+				for _, record := range page.Requests {
+					if record.UserID != member.ID || record.AccountID != "" || record.AccountName != "" {
+						t.Fatal("numbered pagination escaped personal ownership", record.ID)
+					}
+				}
+			}
+		})
+	}
+	for _, query := range []string{"page=-1", "page=bad", "limit=-1", "limit=101", "limit=bad", "cursor=1&page=2"} {
+		if got := request(h, "GET", "/api/me/requests?"+query, "", nil, memberCookie).Code; got != 400 {
+			t.Error("invalid pagination accepted", query, got)
+		}
+	}
 	for _, path := range []string{"/api/me/requests?cursor=-1", "/api/me/requests?cursor=bad", "/api/me/requests?outcome=invalid"} {
 		if got := request(h, "GET", path, "", nil, memberCookie).Code; got != 400 {
 			t.Fatal("invalid filter accepted", path, got)

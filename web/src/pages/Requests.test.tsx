@@ -7,6 +7,107 @@ import { createAppRouter } from '@/router'
 import { i18n } from '@/lib/i18n'
 import { authenticated, memberAuthenticated, workspaces } from '@/test/fixtures'
 
+it.each(['/requests', '/admin/requests'])(
+  'paginates %s by number and resets page size, filters and pruned pages safely',
+  async (path) => {
+    let available = 121
+    const fetch = vi.fn((url: string) => {
+      const query = new URL(url, 'http://example.test')
+      let data: unknown = { accounts: [] }
+      if (url === '/api/auth/state') data = authenticated
+      if (url === '/api/workspaces') data = workspaces
+      if (query.pathname.endsWith('/requests')) {
+        const total =
+          query.searchParams.get('outcome') === 'error' ? 13 : available
+        const pageSize = Number(query.searchParams.get('limit') || 50)
+        const page = Math.min(
+          Number(query.searchParams.get('page') || 1),
+          Math.max(1, Math.ceil(total / pageSize)),
+        )
+        const offset = (page - 1) * pageSize
+        data = {
+          total,
+          page,
+          page_size: pageSize,
+          next_cursor: 0,
+          requests: Array.from(
+            { length: Math.min(pageSize, total - offset) },
+            (_, index) => ({
+              id: total - offset - index,
+              user_id: 1,
+              key_id: 1,
+              group_id: 1,
+              account_id: '',
+              account_name: '',
+              provider: 'codex',
+              model: 'synthetic-model',
+              transport: 'http',
+              operation: 'responses',
+              started_at: 1900000000,
+              duration_ms: 125,
+              request_id: `req_synthetic_${total - offset - index}`,
+              first_token_ms: 42,
+              outcome: 'success',
+              error_code: '',
+              upstream_status: 200,
+              input_tokens: 1250,
+              output_tokens: 50,
+              cached_tokens: 1070,
+              username: 'synthetic-member',
+              key_name: 'Synthetic client',
+              group_name: 'Synthetic group',
+            }),
+          ),
+        }
+      }
+      return Promise.resolve(new Response(JSON.stringify(data)))
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(
+      <App
+        router={createAppRouter(
+          createMemoryHistory({ initialEntries: [path] }),
+        )}
+      />,
+    )
+    const user = userEvent.setup()
+    await screen.findByText('Showing 1–50 of 121')
+    await user.click(screen.getByRole('button', { name: 'Page 3' }))
+    await screen.findByText('Showing 101–121 of 121')
+    expect(
+      (screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Rows per page' }))
+    await user.click(screen.getByRole('menuitemradio', { name: '100' }))
+    await screen.findByText('Showing 1–100 of 121')
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(
+      101,
+    )
+    await user.click(screen.getByRole('button', { name: 'Rows per page' }))
+    await user.click(screen.getByRole('menuitemradio', { name: '25' }))
+    await screen.findByText('Showing 1–25 of 121')
+    await user.click(screen.getByRole('button', { name: 'Page 4' }))
+    await screen.findByText('Showing 76–100 of 121')
+    available = 12
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('Showing 1–12 of 12')
+    await user.click(screen.getByRole('button', { name: 'Result filter' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Failed' }))
+    await screen.findByText('Showing 1–13 of 13')
+    expect(
+      fetch.mock.calls.some(([url]) => {
+        const query = new URL(url, 'http://example.test').searchParams
+        return (
+          query.get('page') === '1' &&
+          query.get('limit') === '25' &&
+          query.get('outcome') === 'error'
+        )
+      }),
+    ).toBe(true)
+  },
+)
+
 it('shows content rule observations and blocked-request recovery without request bodies', async () => {
   vi.stubGlobal(
     'fetch',
@@ -54,6 +155,9 @@ it('shows content rule observations and blocked-request recovery without request
                         },
                       ],
                       next_cursor: 0,
+                      total: 1,
+                      page: 1,
+                      page_size: 50,
                     }
                   : { accounts: [] },
           ),
@@ -140,6 +244,9 @@ it.each(
               },
             ],
             next_cursor: 0,
+            total: 1,
+            page: 1,
+            page_size: 50,
           }
         return Promise.resolve(new Response(JSON.stringify(data)))
       }),
@@ -216,6 +323,9 @@ it.each(['responses', 'messages', 'gemini'])(
             },
           ],
           next_cursor: 0,
+          total: 1,
+          page: 1,
+          page_size: 50,
         }
       return Promise.resolve(new Response(JSON.stringify(data)))
     })
@@ -281,6 +391,9 @@ it.each([memberAuthenticated, authenticated])(
                 },
               ],
               next_cursor: 0,
+              total: 1,
+              page: 1,
+              page_size: 50,
             }),
           ),
         )
@@ -366,6 +479,9 @@ it.each([
                   },
                 ],
                 next_cursor: 0,
+                total: 1,
+                page: 1,
+                page_size: 50,
               }),
             ),
           )
@@ -448,6 +564,9 @@ it('filters diagnostics by model and caller, then copies the request ID', async 
               },
             ],
             next_cursor: 0,
+            total: 1,
+            page: 1,
+            page_size: 50,
           }),
         ),
       )
@@ -555,6 +674,9 @@ it.each(
               },
             ],
             next_cursor: 0,
+            total: 1,
+            page: 1,
+            page_size: 50,
           }
         return Promise.resolve(new Response(JSON.stringify(data)))
       }),

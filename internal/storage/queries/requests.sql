@@ -23,7 +23,21 @@ WHERE g.tenant_id=sqlc.arg(tenant_id)
  AND (r.key_id=sqlc.arg(key_id) OR sqlc.arg(key_id)=0)
  AND (r.model=sqlc.arg(model) OR sqlc.arg(model)='')
  AND (r.request_id=sqlc.arg(request_id) OR sqlc.arg(request_id)='')
-ORDER BY r.id DESC LIMIT 51;
+ORDER BY r.id DESC LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountRequests :one
+-- Match ListRequests filters before pagination so totals never escape the caller's scope.
+SELECT COUNT(*) FROM request_records r JOIN account_groups g ON g.id=r.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id)
+ AND (r.user_id=sqlc.arg(user_id) OR sqlc.arg(user_id)=0)
+ AND (r.account_id=sqlc.arg(account_id) OR sqlc.arg(account_id)='')
+ AND (r.outcome=sqlc.arg(outcome) OR sqlc.arg(outcome)='')
+ AND r.started_at>=sqlc.arg(since)
+ AND (r.started_at<sqlc.arg(until_time) OR sqlc.arg(until_time)=0)
+ AND (r.user_id=sqlc.arg(member_id) OR sqlc.arg(member_id)=0)
+ AND (r.key_id=sqlc.arg(key_id) OR sqlc.arg(key_id)=0)
+ AND (r.model=sqlc.arg(model) OR sqlc.arg(model)='')
+ AND (r.request_id=sqlc.arg(request_id) OR sqlc.arg(request_id)='');
 
 -- name: ListRequestCallers :many
 SELECT r.user_id, r.key_id, COALESCE(u.username,'') AS username, COALESCE(k.name,'') AS key_name

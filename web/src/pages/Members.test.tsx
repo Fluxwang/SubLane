@@ -1,10 +1,13 @@
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { withPage } from '@/test/fixtures'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryHistory } from '@tanstack/react-router'
 import { expect, it, vi } from 'vitest'
 import { App } from '@/App'
 import { createAppRouter } from '@/router'
 import { authenticated } from '@/test/fixtures'
+import * as queries from '@/lib/query'
+import { authKey } from '@/lib/auth'
 
 const syntheticMember = {
   id: 2,
@@ -14,7 +17,52 @@ const syntheticMember = {
   created_at: 1900000000,
 }
 const response = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status })
+  new Response(JSON.stringify(withPage(data)), { status })
+
+it('clears the previous administrator roster while the next identity is loading', async () => {
+  const client = queries.createQueryClient()
+  client.setQueryData(authKey, authenticated)
+  vi.spyOn(queries, 'createQueryClient').mockReturnValue(client)
+  let complete: ((value: Response) => void) | undefined
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/workspaces')
+        return Promise.resolve(response({ tenants: [] }))
+      if (url.startsWith('/api/members?')) {
+        if (client.getQueryData<typeof authenticated>(authKey)?.user.id === 1) {
+          return Promise.resolve(
+            response({
+              members: [
+                { ...syntheticMember, username: 'synthetic-private-first' },
+              ],
+              next_cursor: 0,
+            }),
+          )
+        }
+        return new Promise<Response>((resolve) => {
+          complete = resolve
+        })
+      }
+      return Promise.resolve(response(authenticated))
+    }),
+  )
+  open()
+  await screen.findByText('synthetic-private-first')
+  await act(async () => {
+    client.setQueryData(authKey, {
+      ...authenticated,
+      user: { ...authenticated.user, id: 99 },
+    })
+  })
+  await waitFor(() => expect(complete).toBeTypeOf('function'))
+  const leaked = screen.queryByText('synthetic-private-first') !== null
+  await act(async () => {
+    complete?.(response({ members: [], next_cursor: 0 }))
+  })
+  expect(leaked).toBe(false)
+  client.clear()
+})
 
 it('lets the workspace owner edit their own request limits', async () => {
   const policy = {
@@ -294,7 +342,7 @@ it('grants resource pool access directly to a member', async () => {
     .mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/auth/state')
         return Promise.resolve(response(authenticated))
-      if (url === '/api/members?cursor=0')
+      if (url === '/api/members?page=1&limit=50')
         return Promise.resolve(
           response({ members: [syntheticMember], next_cursor: 0 }),
         )

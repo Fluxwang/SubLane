@@ -9,6 +9,26 @@ import (
 	"context"
 )
 
+const countAuditEvents = `-- name: CountAuditEvents :one
+SELECT COUNT(*) FROM audit_events
+WHERE tenant_id=?1
+AND (resource=?2 OR ?2='')
+AND (outcome=?3 OR ?3='')
+`
+
+type CountAuditEventsParams struct {
+	TenantID int64
+	Resource string
+	Outcome  string
+}
+
+func (q *Queries) CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAuditEvents, arg.TenantID, arg.Resource, arg.Outcome)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAuditEvent = `-- name: CreateAuditEvent :exec
 INSERT INTO audit_events(tenant_id,actor_id,actor_name,actor_role,source,action,resource,resource_id,outcome,http_status,created_at)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
@@ -50,14 +70,16 @@ SELECT id, tenant_id, actor_id, actor_name, actor_role, source, "action", resour
 WHERE tenant_id=?1 AND (id<?2 OR ?2=0)
 AND (resource=?3 OR ?3='')
 AND (outcome=?4 OR ?4='')
-ORDER BY id DESC LIMIT 51
+ORDER BY id DESC LIMIT ?6 OFFSET ?5
 `
 
 type ListAuditEventsParams struct {
-	TenantID int64
-	BeforeID int64
-	Resource string
-	Outcome  string
+	TenantID   int64
+	BeforeID   int64
+	Resource   string
+	Outcome    string
+	PageOffset int64
+	PageLimit  int64
 }
 
 func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error) {
@@ -66,6 +88,8 @@ func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams
 		arg.BeforeID,
 		arg.Resource,
 		arg.Outcome,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

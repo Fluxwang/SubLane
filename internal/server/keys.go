@@ -52,14 +52,12 @@ func (h *keyHTTP) requireAvailable(next http.Handler) http.Handler {
 
 func (h *keyHTTP) list(w http.ResponseWriter, r *http.Request) {
 	var filter apikey.Filter
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value < 0 {
-			keyError(w, apikey.ErrInput)
-			return
-		}
-		filter.BeforeID = value
+	paging, valid := parsePagination(r.URL.Query())
+	if !valid {
+		keyError(w, apikey.ErrInput)
+		return
 	}
+	filter.BeforeID, filter.Page, filter.Limit = paging.Cursor, paging.Page, paging.Limit
 	if raw := r.URL.Query().Get("include_revoked"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {

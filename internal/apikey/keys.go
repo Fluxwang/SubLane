@@ -15,6 +15,7 @@ import (
 	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/groups"
+	"github.com/murongg/SubLane/internal/pagination"
 	"github.com/murongg/SubLane/internal/storage/db"
 	"github.com/murongg/SubLane/internal/vault"
 )
@@ -57,12 +58,14 @@ type CreatedKey struct {
 	Secret string `json:"secret"`
 }
 type Page struct {
+	pagination.Metadata
 	ServerTime int64 `json:"server_time"`
 	Keys       []Key `json:"keys"`
 	NextCursor int64 `json:"next_cursor"`
 }
 type Filter struct {
 	BeforeID       int64
+	Page, Limit    int64
 	IncludeRevoked bool
 }
 type Principal struct{ KeyID, UserID, GroupID, TenantID int64 }
@@ -214,12 +217,32 @@ func (s *Service) create(ctx context.Context, userID, groupID, schemeID int64, n
 
 func (s *Service) List(ctx context.Context, userID int64, filter Filter) (Page, error) {
 	page := Page{Keys: []Key{}, ServerTime: s.now().Unix()}
-	if filter.BeforeID < 0 {
+	bounds := pagination.Input{Page: filter.Page, Limit: filter.Limit, Cursor: filter.BeforeID}
+	if !bounds.Valid() {
 		return page, ErrInput
 	}
-	rows, err := s.queries.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: filter.BeforeID, IncludeRevoked: filter.IncludeRevoked})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return page, err
+	}
+	defer tx.Rollback()
+	q := s.queries.WithTx(tx)
+	total, err := q.CountKeys(ctx, db.CountKeysParams{UserID: userID, TenantID: s.tenantID, IncludeRevoked: filter.IncludeRevoked})
+	if err != nil {
+		return page, err
+	}
+	page.Metadata = bounds.Resolve(total)
+	rows, err := q.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: filter.BeforeID, IncludeRevoked: filter.IncludeRevoked, PageLimit: page.PageSize + 1, PageOffset: page.Offset()})
+	if err != nil {
+		return page, err
+	}
+	// Release the snapshot before allowance lookups use the database connection.
+	if err := tx.Commit(); err != nil {
+		return page, err
+	}
+	if int64(len(rows)) > page.PageSize {
+		rows = rows[:page.PageSize]
+		page.NextCursor = rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
 		key := Key(row)
@@ -230,10 +253,6 @@ func (s *Service) List(ctx context.Context, userID int64, filter Filter) (Page, 
 			key.GroupAccess = "blocked"
 		}
 		page.Keys = append(page.Keys, key)
-	}
-	if len(page.Keys) > 50 {
-		page.Keys = page.Keys[:50]
-		page.NextCursor = page.Keys[49].ID
 	}
 	return page, nil
 }

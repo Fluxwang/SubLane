@@ -1,5 +1,8 @@
 import { z } from 'zod'
+import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { request } from './request'
+import { authKey, type AuthState } from './auth'
+import { cachePage, paginationFields } from './pagination'
 import { selectedWorkspace } from './workspace'
 
 const memberSchema = z.object({
@@ -10,8 +13,8 @@ const memberSchema = z.object({
   created_at: z.number().int().nonnegative(),
 })
 const pageSchema = z.object({
-  members: z.array(memberSchema).max(50),
-  next_cursor: z.number().int().nonnegative(),
+  members: z.array(memberSchema).max(100),
+  ...paginationFields,
 })
 export type Member = z.infer<typeof memberSchema>
 
@@ -27,8 +30,30 @@ export function createInvitation() {
   })
 }
 
-export function getMembers(cursor: number, signal?: AbortSignal) {
-  return request(`/api/members?cursor=${cursor}`, pageSchema, { signal })
+export function memberOptions(
+  client: QueryClient,
+  page: number,
+  pageSize: number,
+) {
+  const userID = client.getQueryData<AuthState>(authKey)?.user?.id
+  const enabled = () => {
+    const user = client.getQueryData<AuthState>(authKey)?.user
+    return user?.id === userID && user?.role === 'admin'
+  }
+  const key = (value: number) => ['members', userID, value, pageSize] as const
+  return queryOptions({
+    queryKey: key(page),
+    enabled,
+    queryFn: async ({ signal }) => {
+      const data = await request(
+        `/api/members?page=${page}&limit=${pageSize}`,
+        pageSchema,
+        { signal },
+      )
+      if (enabled()) cachePage(client, key, page, data)
+      return data
+    },
+  })
 }
 export function createMember(input: { username: string; password: string }) {
   return request('/api/members', memberSchema, {

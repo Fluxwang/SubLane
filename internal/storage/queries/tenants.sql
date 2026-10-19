@@ -3,7 +3,11 @@ SELECT u.id,u.username,m.role,m.enabled,u.enabled AS user_enabled,m.created_at
 FROM memberships m JOIN users u ON u.id=m.user_id
 WHERE m.tenant_id=sqlc.arg(tenant_id) AND m.role IN ('owner','member','admin')
 AND (u.id<sqlc.arg(before_id) OR sqlc.arg(before_id)=0)
-ORDER BY u.id DESC LIMIT 51;
+ORDER BY u.id DESC LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountTenantMembers :one
+SELECT COUNT(*) FROM memberships m JOIN users u ON u.id=m.user_id
+WHERE m.tenant_id=sqlc.arg(tenant_id) AND m.role IN ('owner','member','admin');
 
 -- name: CanManageTenant :one
 SELECT EXISTS(SELECT 1 FROM memberships m JOIN tenants t ON t.id=m.tenant_id JOIN users u ON u.id=m.user_id

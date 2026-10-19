@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,16 +20,12 @@ func (h *auditHTTP) list(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "unavailable"})
 		return
 	}
-	cursor := int64(0)
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		var err error
-		cursor, err = strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			writeJSON(w, 400, map[string]string{"error": "invalid_input"})
-			return
-		}
+	paging, valid := parsePagination(r.URL.Query())
+	if !valid {
+		writeJSON(w, 400, map[string]string{"error": "invalid_input"})
+		return
 	}
-	page, err := h.service.List(r.Context(), audit.Filter{BeforeID: cursor, Resource: r.URL.Query().Get("resource"), Outcome: r.URL.Query().Get("outcome")})
+	page, err := h.service.List(r.Context(), audit.Filter{BeforeID: paging.Cursor, Page: paging.Page, Limit: paging.Limit, Resource: r.URL.Query().Get("resource"), Outcome: r.URL.Query().Get("outcome")})
 	if err != nil {
 		status, code := 503, "unavailable"
 		if errors.Is(err, audit.ErrInput) {

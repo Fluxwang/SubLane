@@ -1,3 +1,4 @@
+import { withPage } from '@/test/fixtures'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryHistory } from '@tanstack/react-router'
@@ -47,7 +48,7 @@ function scenario(stage: SetupProgress['stage'], member = false) {
   const state = { stage, failed: false }
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const response = (value: unknown, status = 200) =>
-      new Response(JSON.stringify(value), { status })
+      new Response(JSON.stringify(withPage(value)), { status })
     if (url === '/api/auth/state')
       return response(member ? memberAuthenticated : authenticated)
     if (url === '/api/workspaces') return response(workspaces)

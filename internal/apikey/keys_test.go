@@ -71,7 +71,7 @@ func TestPersonalKeysAreBoundToWorkspace(t *testing.T) {
 	}{{first, a, b}, {second, b, a}} {
 		for _, includeRevoked := range []bool{false, true} {
 			page, err := check.service.List(ctx, member.ID, Filter{IncludeRevoked: includeRevoked})
-			if err != nil || len(page.Keys) != 1 || page.Keys[0].ID != check.own.Key.ID {
+			if err != nil || len(page.Keys) != 1 || page.Total != 1 || page.Keys[0].ID != check.own.Key.ID {
 				t.Fatalf("key metadata leaked across workspaces: %+v, %v", page, err)
 			}
 		}

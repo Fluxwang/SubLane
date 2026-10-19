@@ -1,3 +1,4 @@
+import { withPage } from '@/test/fixtures'
 import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryHistory } from '@tanstack/react-router'
@@ -27,7 +28,7 @@ const response = (value: unknown) =>
   new Response(
     JSON.stringify(
       value && typeof value === 'object' && 'keys' in value
-        ? { server_time: 1900000000, ...value }
+        ? withPage({ server_time: 1900000000, ...value })
         : value,
     ),
   )
@@ -115,16 +116,18 @@ it('resets pagination in both directions and keeps filtered pages in separate ca
         return Promise.resolve(response(memberAuthenticated))
       calls.push(url)
       const params = new URL(url, 'http://example.test').searchParams
-      const cursor = params.get('cursor')
+      const pageNumber = Number(params.get('page') || 1)
       const includeRevoked = params.get('include_revoked') === 'true'
       const page = includeRevoked
-        ? cursor === '0'
+        ? pageNumber === 1
           ? { keys: [revoked], next_cursor: 8 }
           : { keys: [active], next_cursor: 0 }
-        : cursor === '0'
+        : pageNumber === 1
           ? { keys: [active], next_cursor: 3 }
           : { keys: [paused], next_cursor: 0 }
-      return Promise.resolve(response(page))
+      return Promise.resolve(
+        response({ ...page, total: 51, page: pageNumber, page_size: 50 }),
+      )
     }),
   )
   const user = userEvent.setup()
@@ -154,12 +157,10 @@ it('resets pagination in both directions and keeps filtered pages in separate ca
     screen.getByRole('button', { name: 'Previous' }).hasAttribute('disabled'),
   ).toBe(true)
   expect(screen.queryByText('Synthetic revoked')).toBeNull()
-  expect(calls).toContain('/api/keys?cursor=0&include_revoked=false')
-  expect(calls).toContain('/api/keys?cursor=3&include_revoked=false')
-  expect(calls).toContain('/api/keys?cursor=0&include_revoked=true')
-  expect(calls).toContain('/api/keys?cursor=8&include_revoked=true')
-  expect(calls).not.toContain('/api/keys?cursor=3&include_revoked=true')
-  expect(calls).not.toContain('/api/keys?cursor=8&include_revoked=false')
+  expect(calls).toContain('/api/keys?page=1&limit=50&include_revoked=false')
+  expect(calls).toContain('/api/keys?page=2&limit=50&include_revoked=false')
+  expect(calls).toContain('/api/keys?page=1&limit=50&include_revoked=true')
+  expect(calls).toContain('/api/keys?page=2&limit=50&include_revoked=true')
 })
 
 it('keeps the revoked toggle available in empty and failed filtered views', async () => {
@@ -210,17 +211,26 @@ it('returns to the first page after revoking the last key on a later page', asyn
           }),
         )
       }
-      const cursor = new URL(url, 'http://example.test').searchParams.get(
-        'cursor',
+      const pageNumber = Number(
+        new URL(url, 'http://example.test').searchParams.get('page') || 1,
       )
       return Promise.resolve(
         response(
-          cursor === '0'
+          pageNumber === 1
             ? {
                 keys: [{ ...metadata, id: 4, name: 'Synthetic first' }],
                 next_cursor: revoked ? 0 : 3,
+                total: revoked ? 1 : 51,
+                page: 1,
+                page_size: 50,
               }
-            : { keys: revoked ? [] : [{ ...metadata, id: 2 }], next_cursor: 0 },
+            : {
+                keys: revoked ? [] : [{ ...metadata, id: 2 }],
+                next_cursor: 0,
+                total: revoked ? 1 : 51,
+                page: 2,
+                page_size: 50,
+              },
         ),
       )
     }),
@@ -237,7 +247,10 @@ it('returns to the first page after revoking the last key on a later page', asyn
   await screen.findByText('Synthetic laptop was revoked.')
   await screen.findByText('Synthetic first')
   expect(screen.queryByText('No unrevoked API keys')).toBeNull()
-  expect(screen.queryByRole('button', { name: 'Previous' })).toBeNull()
+  expect(
+    (screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true)
 })
 
 it('lets a member create, copy once, and revoke an owned key', async () => {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/murongg/SubLane/internal/pagination"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -42,9 +43,11 @@ type Event struct {
 }
 type Filter struct {
 	BeforeID          int64
+	Page, Limit       int64
 	Resource, Outcome string
 }
 type Page struct {
+	pagination.Metadata
 	Events     []Event `json:"events"`
 	NextCursor int64   `json:"next_cursor"`
 }
@@ -152,7 +155,8 @@ func (s *Service) Failure(ctx context.Context, action, resource, id string, stat
 }
 func (s *Service) List(ctx context.Context, f Filter) (Page, error) {
 	page := Page{Events: []Event{}}
-	if f.BeforeID < 0 || (f.Outcome != "" && f.Outcome != "success" && f.Outcome != "failure") {
+	bounds := pagination.Input{Page: f.Page, Limit: f.Limit, Cursor: f.BeforeID}
+	if !bounds.Valid() || (f.Outcome != "" && f.Outcome != "success" && f.Outcome != "failure") {
 		return page, ErrInput
 	}
 	switch f.Resource {
@@ -169,16 +173,21 @@ func (s *Service) List(ctx context.Context, f Filter) (Page, error) {
 	if err := q.PruneAuditEvents(ctx, db.PruneAuditEventsParams{ScopeTenantID: s.tenantID, Oldest: time.Now().Add(-90 * 24 * time.Hour).Unix()}); err != nil {
 		return page, err
 	}
-	rows, err := q.ListAuditEvents(ctx, db.ListAuditEventsParams{TenantID: s.tenantID, BeforeID: f.BeforeID, Resource: f.Resource, Outcome: f.Outcome})
+	total, err := q.CountAuditEvents(ctx, db.CountAuditEventsParams{TenantID: s.tenantID, Resource: f.Resource, Outcome: f.Outcome})
+	if err != nil {
+		return page, err
+	}
+	page.Metadata = bounds.Resolve(total)
+	rows, err := q.ListAuditEvents(ctx, db.ListAuditEventsParams{TenantID: s.tenantID, BeforeID: f.BeforeID, Resource: f.Resource, Outcome: f.Outcome, PageLimit: page.PageSize + 1, PageOffset: page.Offset()})
 	if err != nil {
 		return page, err
 	}
 	for _, row := range rows {
 		page.Events = append(page.Events, Event{ID: row.ID, ActorID: row.ActorID, ActorName: row.ActorName, ActorRole: row.ActorRole, Source: row.Source, Action: row.Action, Resource: row.Resource, ResourceID: row.ResourceID, Outcome: row.Outcome, HTTPStatus: row.HttpStatus, CreatedAt: row.CreatedAt})
 	}
-	if len(page.Events) > 50 {
-		page.Events = page.Events[:50]
-		page.NextCursor = page.Events[49].ID
+	if int64(len(page.Events)) > page.PageSize {
+		page.Events = page.Events[:page.PageSize]
+		page.NextCursor = page.Events[len(page.Events)-1].ID
 	}
 	return page, tx.Commit()
 }
