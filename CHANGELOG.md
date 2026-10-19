@@ -2,6 +2,12 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.2] - 2026-10-19
+
+### Fixed
+
+- Accept Claude Code system control turns (#88)
+
 ## [0.7.1] - 2026-10-18
 
 ### Fixed
@@ -201,6 +207,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.7.2]: https://github.com/murongg/SubLane/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/murongg/SubLane/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/murongg/SubLane/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/murongg/SubLane/compare/v0.5.0...v0.6.0
