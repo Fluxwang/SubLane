@@ -917,6 +917,22 @@ it("shows each key's lifetime estimated cost with tokens, small amounts, and unp
                       }),
                     },
                     { ...metadata, id: 3, name: 'Synthetic idle' },
+                    {
+                      ...metadata,
+                      id: 4,
+                      name: 'Synthetic unpriced',
+                      usage: used({
+                        input_tokens: 80,
+                        output_tokens: 20,
+                        unpriced_tokens: 100,
+                      }),
+                    },
+                    {
+                      ...metadata,
+                      id: 5,
+                      name: 'Synthetic unreported',
+                      usage: used({ input_reported: 0, output_reported: 0 }),
+                    },
                   ],
                   next_cursor: 0,
                 },
@@ -939,6 +955,12 @@ it("shows each key's lifetime estimated cost with tokens, small amounts, and unp
   expect(row('Synthetic light').textContent).toContain('< $0.01')
   expect(within(row('Synthetic light')).queryByRole('img')).toBeNull()
   expect(row('Synthetic idle').textContent).toContain('—')
+  // Usage without any priced tokens has no estimate; it must not read as free.
+  expect(row('Synthetic unpriced').textContent).toContain('—')
+  expect(row('Synthetic unpriced').textContent).not.toContain('$0.00')
+  expect(within(row('Synthetic unpriced')).getByRole('img')).toBeTruthy()
+  expect(row('Synthetic unreported').textContent).toContain('—')
+  expect(row('Synthetic unreported').textContent).not.toContain('$0.00')
   expect(
     screen.getByText(/Costs are estimated with current prices since/)
       .textContent,

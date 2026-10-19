@@ -88,8 +88,10 @@ function KeyManager({ userID }: { userID: number }) {
     style: 'currency',
     currency: 'USD',
   })
+  // Without any priced reported tokens there is no estimate; an em dash avoids reading as free.
   const cost = (usage: KeyPage['keys'][number]['usage']) =>
-    usage.requests === 0
+    (usage.input_reported === 0 && usage.output_reported === 0) ||
+    usage.unpriced_tokens >= usage.input_tokens + usage.output_tokens
       ? '—'
       : usage.estimated_micro_usd > 0 && usage.estimated_micro_usd < 10_000
         ? t('usageCostBelow', { value: usd.format(0.01) })

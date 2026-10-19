@@ -270,7 +270,7 @@ func (s *Service) KeyUsage(ctx context.Context, userID int64, keyIDs []int64) (K
 		}
 		// Price requests with a cache split exactly; input without one is priceable only when rates match.
 		usage.UnpricedTokens += s.addCost(sum, costBasis{Model: row.Model, InputTokens: row.InputTokens - row.UnsplitInputTokens, OutputTokens: row.OutputTokens, CachedTokens: row.CachedTokens})
-		usage.UnpricedTokens += s.addCost(sum, costBasis{Model: row.Model, InputTokens: row.UnsplitInputTokens, InputReported: 1})
+		usage.UnpricedTokens += s.addCost(sum, unsplitInput(row.Model, row.UnsplitInputTokens))
 		summary.Keys[row.KeyID] = usage
 	}
 	for id, sum := range sums {
@@ -303,6 +303,11 @@ func (s *Service) addCost(sum *big.Int, row costBasis) int64 {
 	return 0
 }
 
+// unsplitInput describes input reported without a cache split, which is priceable only when both input rates match.
+func unsplitInput(model string, tokens int64) costBasis {
+	return costBasis{Model: model, InputTokens: tokens, InputReported: 1}
+}
+
 // microUSD rounds an exact sum up so that any priced usage is never shown as free.
 func microUSD(sum *big.Int) int64 {
 	rounded := new(big.Int).Add(sum, big.NewInt(999_999))
@@ -333,6 +338,8 @@ func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestPara
 	if r.Provider != "" && model != "" {
 		model = r.Provider + "/" + strings.TrimPrefix(model, r.Provider+"/")
 	}
+	// Lifetime key usage applies its own per-key bound to the original label, not today's per-member one.
+	keyModel := model
 	// Model names are client-controlled. Bound new labels while retaining every request in totals.
 	tracked, err := q.CanTrackStatisticsModel(ctx, db.CanTrackStatisticsModelParams{GroupID: r.GroupID, Day: r.StartedAt - r.StartedAt%86400, UserID: r.UserID, Model: model})
 	if err != nil {
@@ -377,7 +384,7 @@ func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestPara
 		if err := q.RecordKeyStatistics(ctx, db.RecordKeyStatisticsParams{Day: entry.Day, KeyID: r.KeyID, Requests: entry.Requests, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, CachedTokens: entry.CachedTokens, InputReported: entry.InputReported, OutputReported: entry.OutputReported, CachedReported: entry.CachedReported}); err != nil {
 			return err
 		}
-		if err := recordKeyLifetimeUsage(ctx, q, r.KeyID, model, entry); err != nil {
+		if err := recordKeyLifetimeUsage(ctx, q, r.KeyID, keyModel, entry); err != nil {
 			return err
 		}
 	}

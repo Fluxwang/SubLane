@@ -365,3 +365,57 @@ func TestKeyLifetimeCostSurvivesRetentionAndStaysOwnerScoped(t *testing.T) {
 		t.Fatal("key cost disclosed to another member", other, err)
 	}
 }
+
+func TestKeyUsageKeepsItsOwnBounds(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	s.pricing = pricing.NewStatic(map[string]pricing.Price{"synthetic-priced": {Input: 1_000_000, Cached: 1_000_000, Output: 1_000_000}})
+	var keys []int64
+	for i := range 22 {
+		result, err := s.db.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(1,1,?,'sl_fake',randomblob(32),1)", fmt.Sprintf("synthetic-%02d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		keys = append(keys, id)
+	}
+	value := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	record := func(key int64, model string, at int64) {
+		r := db.RecordRequestParams{UserID: 1, KeyID: key, GroupID: 1, Provider: "codex", Model: model, StartedAt: at, Outcome: "success", InputTokens: value(1_000_000), OutputTokens: value(0), CachedTokens: value(0)}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := s.now().Unix()
+	// Browser-side traffic fills today's per-member model labels; the key's lifetime labels are separate.
+	for i := range 64 {
+		record(0, fmt.Sprintf("browser-%02d", i), now)
+	}
+	record(keys[0], "synthetic-priced", now)
+	for i := range 70 {
+		record(keys[0], fmt.Sprintf("synthetic-%02d", i), now-int64(1+i)*86400)
+	}
+	for _, key := range keys[1:] {
+		record(key, "synthetic-priced", now)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := s.KeyUsage(ctx, 1, keys[:1])
+	if err != nil || usage.Keys[keys[0]].Requests != 71 || usage.Keys[keys[0]].EstimatedMicroUSD != 1_000_000 {
+		t.Fatal("key lifetime usage lost its own model label", usage, err)
+	}
+	var labels int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM usage_lifetime_keys WHERE key_id=?", keys[0]).Scan(&labels); err != nil || labels != 65 {
+		t.Fatal("unbounded lifetime model labels", labels, err)
+	}
+	stats, err := s.Statistics(ctx, 1)
+	if err != nil || len(stats.Keys) != 20 {
+		t.Fatal("unbounded key ranking", len(stats.Keys), err)
+	}
+}

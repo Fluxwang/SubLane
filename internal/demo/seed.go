@@ -113,6 +113,7 @@ func seed(ctx context.Context, connection *sql.DB, identity *auth.Service, accou
 				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported, CachedReported: metrics.CachedReported}); err != nil {
 				return err
 			}
+			// Two synthetic models always report a cache split, so no label bound or unsplit input applies.
 			if err := q.RecordKeyLifetimeUsage(ctx, db.RecordKeyLifetimeUsageParams{KeyID: record.KeyID, Model: model, Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens,
 				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported}); err != nil {
 				return err
