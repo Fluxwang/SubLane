@@ -132,10 +132,11 @@ CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
 CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
 CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
 CAST(COALESCE(SUM(s.output_reported),0) AS INTEGER) AS output_reported,
-CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported,
+CAST(COALESCE(CASE ?1 WHEN 'model' THEN SUM(s.input_tokens+s.output_tokens) ELSE SUM(s.requests) END,0) AS INTEGER) AS weight
 FROM usage_daily s LEFT JOIN users u ON u.id=s.user_id JOIN account_groups g ON g.id=s.group_id
 WHERE g.tenant_id=?2 AND s.day>=?3 AND s.day<?4 AND (s.user_id=?5 OR ?5=0)
-GROUP BY 1,2 ORDER BY requests DESC,bucket ASC LIMIT ?6
+GROUP BY 1,2 ORDER BY weight DESC,requests DESC,bucket ASC LIMIT ?6
 `
 
 type ListStatisticsParams struct {
@@ -163,8 +164,10 @@ type ListStatisticsRow struct {
 	InputReported  int64
 	OutputReported int64
 	CachedReported int64
+	Weight         int64
 }
 
+// Usage rankings order models by reported tokens; other dimensions stay request-ordered.
 func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) ([]ListStatisticsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listStatistics,
 		arg.Dimension,
@@ -197,6 +200,7 @@ func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) 
 			&i.InputReported,
 			&i.OutputReported,
 			&i.CachedReported,
+			&i.Weight,
 		); err != nil {
 			return nil, err
 		}

@@ -12,6 +12,7 @@ import {
 import type { en } from '@/locales/en'
 import { Button } from '@/components/ui/Button'
 import { UsageChart } from '@/components/UsageChart'
+import { UsageRanking } from '@/components/UsageRanking'
 import { PersonalAllocations } from '@/components/PersonalAllocations'
 import { ActivityMap } from '@/components/ActivityMap'
 import {
@@ -88,12 +89,12 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
         view !== 'days' || Number(row.id) + 86400 > query.data!.tracking_since,
     ) ?? []
   const totals = query.data?.totals
+  const labelName = (row: Statistic) =>
+    row.name === '[other models]'
+      ? t('usageOtherModels')
+      : row.name || t('statisticsUnknown')
   const rowName = (row: Statistic) =>
-    view === 'days'
-      ? date.format(Number(row.id) * 1000)
-      : row.name === '[other models]'
-        ? t('usageOtherModels')
-        : row.name || t('statisticsUnknown')
+    view === 'days' ? date.format(Number(row.id) * 1000) : labelName(row)
   const exactNumber = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')
   // Token units stay K/M/B in every interface language.
   const compactNumber = new Intl.NumberFormat('en', {
@@ -383,51 +384,62 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
               </>
             ) : (
               <div className="space-y-5">
-                <section
-                  aria-label={t('usageChart')}
-                  className="rounded-xl border border-border bg-card p-4 sm:p-6"
-                >
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="font-medium">
-                      {t('usageTrend')} · {period(days)}
-                    </h3>
-                    <div
-                      role="group"
-                      aria-label={t('usageMetric')}
-                      className="flex rounded-lg bg-muted p-1"
-                    >
-                      {(Object.keys(metricLabels) as UsageMetric[]).map(
-                        (value) => (
-                          <button
-                            key={value}
-                            type="button"
-                            aria-pressed={metric === value}
-                            onClick={() => setMetric(value)}
-                            className="rounded-md px-3 py-1 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-card aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm"
-                          >
-                            {t(metricLabels[value])}
-                          </button>
-                        ),
-                      )}
+                <div className="grid gap-5 xl:grid-cols-3">
+                  <section
+                    aria-label={t('usageChart')}
+                    className="min-w-0 rounded-xl border border-border bg-card p-4 sm:p-6 xl:col-span-2"
+                  >
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-medium">
+                        {t('usageTrend')} · {period(days)}
+                      </h3>
+                      <div
+                        role="group"
+                        aria-label={t('usageMetric')}
+                        className="flex rounded-lg bg-muted p-1"
+                      >
+                        {(Object.keys(metricLabels) as UsageMetric[]).map(
+                          (value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={metric === value}
+                              onClick={() => setMetric(value)}
+                              className="rounded-md px-3 py-1 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-card aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm"
+                            >
+                              {t(metricLabels[value])}
+                            </button>
+                          ),
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <UsageChart
-                    key={days + metric}
-                    points={trend}
-                    label={t('usageTrend') + ' · ' + t(metricLabels[metric])}
-                    metricLabel={t(metricLabels[metric])}
-                    format={
-                      metric === 'cost'
-                        ? cost
-                        : (value) => exactNumber.format(value)
-                    }
-                    axis={
-                      metric === 'cost'
-                        ? (value) => usdAxis.format(value / 1_000_000)
-                        : (value) => compactNumber.format(value)
-                    }
+                    <UsageChart
+                      key={days + metric}
+                      points={trend}
+                      label={t('usageTrend') + ' · ' + t(metricLabels[metric])}
+                      metricLabel={t(metricLabels[metric])}
+                      format={
+                        metric === 'cost'
+                          ? cost
+                          : (value) => exactNumber.format(value)
+                      }
+                      axis={
+                        metric === 'cost'
+                          ? (value) => usdAxis.format(value / 1_000_000)
+                          : (value) => compactNumber.format(value)
+                      }
+                    />
+                  </section>
+                  <UsageRanking
+                    key={days}
+                    items={query.data.models.map((row) => ({
+                      id: row.id,
+                      name: labelName(row),
+                      tokens: row.input_tokens + row.output_tokens,
+                    }))}
+                    formatTokens={(tokens) => tokenToggle([tokens])}
                   />
-                </section>
+                </div>
                 <ActivityMap
                   key={days}
                   activity={query.data.activity}

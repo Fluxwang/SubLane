@@ -209,3 +209,37 @@ func TestStatisticsEstimateCostFromCurrentPricesAndReportUnpricedTokens(t *testi
 		t.Fatal("missing price catalog fabricated cost", stats.Cost, err)
 	}
 }
+
+func TestStatisticsRankModelsByReportedTokens(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	tokens := func(v int64) *int64 { return &v }
+	record := func(model string, input, output int64) {
+		r := db.RecordRequestParams{UserID: 1, GroupID: 1, Provider: "codex", Model: model, StartedAt: s.now().Unix(), Outcome: "success", InputTokens: tokens(input), OutputTokens: tokens(output)}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Twenty request-heavy models would fill the old request-ordered cutoff.
+	for i := range 20 {
+		for range 3 {
+			record(fmt.Sprintf("busy-%02d", i), 10, 10)
+		}
+	}
+	record("long-context", 500_000, 1_000)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.Statistics(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Models) != 20 || stats.Models[0].Name != "codex/long-context" {
+		t.Fatal("token-heavy model missing from the token ranking", stats.Models)
+	}
+}
