@@ -10,6 +10,19 @@ import (
 
 const messageStart = `data: {"type":"message_start","message":{"id":"synthetic","type":"message","role":"assistant"}}` + "\n\n"
 
+func TestMessagesValidationAcceptsSystemTurns(t *testing.T) {
+	for _, content := range []string{
+		`"Synthetic instruction"`,
+		`[{"type":"text","text":"Synthetic instruction","cache_control":{"type":"ephemeral"}}]`,
+		`[]`,
+	} {
+		raw := []byte(`{"model":"synthetic-model","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"Synthetic prompt"},{"role":"system","content":` + content + `,"output_config":{"effort":"medium"}}]}`)
+		if err := ValidateMessages(raw); err != nil {
+			t.Errorf("system content %s rejected: %v", content, err)
+		}
+	}
+}
+
 func TestNativeLargeRequestValidation(t *testing.T) {
 	text := strings.Repeat("x", (8<<20)+1)
 	if err := ValidateMessages([]byte(`{"model":"synthetic","max_tokens":1,"messages":[{"role":"user","content":"` + text + `"}]}`)); err != nil {
@@ -100,6 +113,13 @@ func TestNativeRequestValidationRejectsMalformedContent(t *testing.T) {
 		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"user","content":[{}]}]}`,
 		`{"model":"synthetic","max_tokens":0,"messages":[{"role":"user","content":"synthetic"}]}`,
 		`{"model":"synthetic","max_tokens":1,"messages":[]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"developer","content":"synthetic"}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"user","content":[]}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"assistant","content":[]}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"system","content":null}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"system"}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"system","content":[null]}]}`,
+		`{"model":"synthetic","max_tokens":1,"messages":[{"role":"system","content":{}}]}`,
 	} {
 		if ValidateMessages([]byte(raw)) == nil {
 			t.Fatal("invalid message accepted", raw)
