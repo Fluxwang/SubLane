@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, EyeOff, KeyRound, LoaderCircle } from 'lucide-react'
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  LoaderCircle,
+  TriangleAlert,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
 import { keyOptions, keyState, type APIKey, type KeyPage } from '@/lib/keys'
@@ -60,7 +66,7 @@ function KeyManager({ userID }: { userID: number }) {
         revoked_count: page.revoked_count + 1,
         keys: included
           ? page.keys.map((key) =>
-              key.id === revokedKey.id ? revokedKey : key,
+              key.id === revokedKey.id ? { ...key, ...revokedKey } : key,
             )
           : page.keys.filter((key) => key.id !== revokedKey.id),
       })
@@ -73,6 +79,23 @@ function KeyManager({ userID }: { userID: number }) {
     timeZone,
     dateStyle: 'medium',
   })
+  // Like the usage report, token units and USD amounts keep one form in every interface language.
+  const compactTokens = new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+  const usd = new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency: 'USD',
+  })
+  // Without any priced reported tokens there is no estimate; an em dash avoids reading as free.
+  const cost = (usage: KeyPage['keys'][number]['usage']) =>
+    (usage.input_reported === 0 && usage.output_reported === 0) ||
+    usage.unpriced_tokens >= usage.input_tokens + usage.output_tokens
+      ? '—'
+      : usage.estimated_micro_usd > 0 && usage.estimated_micro_usd < 10_000
+        ? t('usageCostBelow', { value: usd.format(0.01) })
+        : usd.format(usage.estimated_micro_usd / 1_000_000)
   const allRevoked = !showRevoked && (query.data?.revoked_count ?? 0) > 0
   return (
     <div className="space-y-6">
@@ -106,11 +129,16 @@ function KeyManager({ userID }: { userID: number }) {
         </p>
       )}
       {query.data && (
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {t('keyCostNote', {
+              date: dates.format(query.data.key_tracking_since * 1000),
+            })}
+          </p>
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground aria-pressed:text-foreground"
+            className="ml-auto text-muted-foreground aria-pressed:text-foreground"
             aria-pressed={showRevoked}
             disabled={
               query.isFetching ||
@@ -199,6 +227,9 @@ function KeyManager({ userID }: { userID: number }) {
                 <th scope="col" className="px-5 py-3 font-medium">
                   {t('keyLastUsed')}
                 </th>
+                <th scope="col" className="px-5 py-3 font-medium">
+                  {t('keyCost')}
+                </th>
                 <th scope="col" className="px-5 py-3 text-right font-medium">
                   {t('actions')}
                 </th>
@@ -265,6 +296,34 @@ function KeyManager({ userID }: { userID: number }) {
                     {key.last_used_at === null
                       ? t('neverUsed')
                       : dates.format(key.last_used_at * 1000)}
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <span className="inline-flex items-center gap-1.5 font-medium tabular-nums">
+                      {cost(key.usage)}
+                      {key.usage.unpriced_tokens > 0 && (
+                        <span
+                          role="img"
+                          aria-label={t('keyCostUnpriced')}
+                          title={t('keyCostUnpriced')}
+                          className="text-warning"
+                        >
+                          <TriangleAlert
+                            className="size-3.5"
+                            aria-hidden="true"
+                          />
+                        </span>
+                      )}
+                    </span>
+                    {(key.usage.input_reported > 0 ||
+                      key.usage.output_reported > 0) && (
+                      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                        {t('keyLifetimeTokens', {
+                          value: compactTokens.format(
+                            key.usage.input_tokens + key.usage.output_tokens,
+                          ),
+                        })}
+                      </p>
+                    )}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <div className="flex justify-end gap-2">

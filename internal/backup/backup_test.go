@@ -191,6 +191,9 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	}
 	// Keep this archive on its historical schema so restore exercises newer migrations.
 	if _, err := connection.ExecContext(ctx, `DROP VIEW routable_group_resources;
+DROP TABLE usage_lifetime_keys;
+DROP TABLE usage_daily_keys;
+DELETE FROM settings WHERE key='usage.keys.started_at';
 ALTER TABLE account_groups DROP COLUMN routing_preference;
 ALTER TABLE account_groups DROP COLUMN allow_api_fallback;
 DROP TABLE account_model_runtime;

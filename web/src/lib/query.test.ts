@@ -68,6 +68,8 @@ it('stops usage refetches under an obsolete identity', async () => {
     from_day: 1900000000,
     to_day: 1900086400,
     tracking_since: 1900000000,
+    key_tracking_since: 1900000000,
+    keys: [],
     totals: {
       requests: 1,
       completed: 1,

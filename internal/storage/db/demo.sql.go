@@ -11,7 +11,7 @@ import (
 
 const setDemoCoverage = `-- name: SetDemoCoverage :exec
 UPDATE settings SET value = ?1
-WHERE key IN ('usage.daily.started_at', 'usage.hourly.started_at')
+WHERE key IN ('usage.daily.started_at', 'usage.hourly.started_at', 'usage.keys.started_at')
 `
 
 // Only the disposable demo runtime backdates its synthetic usage coverage.

@@ -109,17 +109,34 @@ func TestRequestHistoryDoesNotCrossWorkspaces(t *testing.T) {
 			t.Fatalf("request history leaked across workspaces: %+v, %v", page, err)
 		}
 	}
+	keys := map[int64]int64{}
 	for _, pool := range []int64{firstPool.ID, otherPool.ID} {
-		if err := recordStatistics(ctx, db.New(connection), db.RecordRequestParams{UserID: member.ID,
+		result, err := connection.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(?,?,'synthetic','sl_fake',randomblob(32),1)", member.ID, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys[pool], _ = result.LastInsertId()
+		if err := recordStatistics(ctx, db.New(connection), db.RecordRequestParams{UserID: member.ID, KeyID: keys[pool],
 			GroupID: pool, Model: "synthetic-model", Transport: "http", Operation: "responses",
 			Outcome: "success", StartedAt: time.Now().Unix()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, service := range []*Service{first, second} {
+	for _, check := range []struct {
+		service    *Service
+		own, other int64
+	}{{first, keys[firstPool.ID], keys[otherPool.ID]}, {second, keys[otherPool.ID], keys[firstPool.ID]}} {
+		service := check.service
 		stats, err := service.UserStatistics(ctx, member.ID, 1)
 		if err != nil || stats.Totals.Requests != 1 {
 			t.Fatalf("usage totals leaked across workspaces: %+v, %v", stats.Totals, err)
+		}
+		if workspace, err := service.Statistics(ctx, 1); err != nil || len(workspace.Keys) != 1 || workspace.Keys[0].Requests != 1 {
+			t.Fatalf("key ranking leaked across workspaces: %+v, %v", workspace.Keys, err)
+		}
+		usage, err := service.KeyUsage(ctx, member.ID, []int64{check.own, check.other})
+		if _, leaked := usage.Keys[check.other]; err != nil || len(usage.Keys) != 1 || leaked {
+			t.Fatalf("key lifetime usage leaked across workspaces: %+v, %v", usage, err)
 		}
 		var activity int64
 		for _, cell := range stats.Activity.Cells {

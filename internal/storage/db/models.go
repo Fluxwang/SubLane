@@ -114,3 +114,15 @@ type Proxy struct {
 	LatencyMs  int64
 	CheckError string
 }
+
+type UsageLifetimeKey struct {
+	KeyID              int64
+	Model              string
+	Requests           int64
+	InputTokens        int64
+	OutputTokens       int64
+	CachedTokens       int64
+	UnsplitInputTokens int64
+	InputReported      int64
+	OutputReported     int64
+}

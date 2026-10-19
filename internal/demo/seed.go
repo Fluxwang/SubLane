@@ -109,6 +109,15 @@ func seed(ctx context.Context, connection *sql.DB, identity *auth.Service, accou
 			if err := q.RecordStatistics(ctx, metrics); err != nil {
 				return err
 			}
+			if err := q.RecordKeyStatistics(ctx, db.RecordKeyStatisticsParams{Day: metrics.Day, KeyID: record.KeyID, Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens,
+				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported, CachedReported: metrics.CachedReported}); err != nil {
+				return err
+			}
+			// Two synthetic models always report a cache split, so no label bound or unsplit input applies.
+			if err := q.RecordKeyLifetimeUsage(ctx, db.RecordKeyLifetimeUsageParams{KeyID: record.KeyID, Model: model, Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens,
+				CachedTokens: metrics.CachedTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported}); err != nil {
+				return err
+			}
 			if err := q.RecordHourlyUsage(ctx, db.RecordHourlyUsageParams{GroupID: groupID, Hour: at.Truncate(time.Hour).Unix(), UserID: record.UserID,
 				Requests: 1, InputTokens: metrics.InputTokens, OutputTokens: metrics.OutputTokens, InputReported: metrics.InputReported, OutputReported: metrics.OutputReported}); err != nil {
 				return err

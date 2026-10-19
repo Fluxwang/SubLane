@@ -150,7 +150,7 @@ func TestStatisticsBoundsModelCardinalityWithoutLosingCounts(t *testing.T) {
 }
 
 func TestStatisticsRejectsInvalidCoverageSettings(t *testing.T) {
-	for _, key := range []string{"usage.daily.started_at", "usage.hourly.started_at"} {
+	for _, key := range []string{"usage.daily.started_at", "usage.hourly.started_at", "usage.keys.started_at"} {
 		for _, value := range []string{"not-a-time", "9223372036854775808"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				service, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
@@ -207,5 +207,215 @@ func TestStatisticsEstimateCostFromCurrentPricesAndReportUnpricedTokens(t *testi
 	s.pricing = nil
 	if stats, err = s.Statistics(ctx, 7); err != nil || stats.Cost.EstimatedMicroUSD != 0 || stats.Cost.UnpricedTokens != 1_101_350 {
 		t.Fatal("missing price catalog fabricated cost", stats.Cost, err)
+	}
+}
+
+func TestStatisticsRankModelsByReportedTokens(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	tokens := func(v int64) *int64 { return &v }
+	record := func(model string, input, output int64) {
+		r := db.RecordRequestParams{UserID: 1, GroupID: 1, Provider: "codex", Model: model, StartedAt: s.now().Unix(), Outcome: "success", InputTokens: tokens(input), OutputTokens: tokens(output)}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Twenty request-heavy models would fill the old request-ordered cutoff.
+	for i := range 20 {
+		for range 3 {
+			record(fmt.Sprintf("busy-%02d", i), 10, 10)
+		}
+	}
+	record("long-context", 500_000, 1_000)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.Statistics(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Models) != 20 || stats.Models[0].Name != "codex/long-context" {
+		t.Fatal("token-heavy model missing from the token ranking", stats.Models)
+	}
+}
+
+func TestStatisticsRankKeysByReportedTokensWithinScope(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	member := runtimeMember(t, s)
+	key := func(user int64, name string) int64 {
+		result, err := s.db.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(?,1,?,'sl_fake',randomblob(32),1)", user, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	admin, retired, mine := key(1, "admin-cli"), key(1, "retired"), key(member, "member-ide")
+	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET revoked_at=1 WHERE id=?", retired); err != nil {
+		t.Fatal(err)
+	}
+	tokens := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	record := func(user, key, at, input int64) {
+		r := db.RecordRequestParams{UserID: user, KeyID: key, GroupID: 1, Provider: "codex", Model: "synthetic", StartedAt: at, Outcome: "success", InputTokens: tokens(input), OutputTokens: tokens(1)}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := s.now().Unix()
+	record(1, admin, now, 99)
+	record(1, admin, now, 99)
+	record(1, retired, now, 299)
+	record(member, mine, now, 999)
+	record(1, 0, now, 5_000) // Browser-side requests have no key and are never attributed to one.
+	record(1, admin, now-91*86400, 9_999)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.Statistics(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.KeyTrackingSince <= 0 || len(all.Keys) != 3 {
+		t.Fatal("missing key ranking", all.KeyTrackingSince, all.Keys)
+	}
+	want := []struct {
+		name, owner string
+		revoked     bool
+		tokens      int64
+	}{{"member-ide", "limited-member", false, 1000}, {"retired", "synthetic-admin", true, 300}, {"admin-cli", "synthetic-admin", false, 200}}
+	for i, w := range want {
+		got := all.Keys[i]
+		if got.Name != w.name || got.Owner != w.owner || got.Revoked != w.revoked || got.InputTokens+got.OutputTokens != w.tokens {
+			t.Fatal("key ranking out of order or mislabeled", i, got)
+		}
+	}
+	personal, err := s.UserStatistics(ctx, member, 7)
+	if err != nil || len(personal.Keys) != 1 || personal.Keys[0].Name != "member-ide" || personal.Keys[0].Owner != "" {
+		t.Fatal("personal key ranking leaked other members' keys or owners", personal.Keys, err)
+	}
+	if err := pruneHistory(ctx, s.db, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM usage_daily_keys").Scan(&rows); err != nil || rows != 3 {
+		t.Fatal("expired key rows not reclaimed", rows, err)
+	}
+}
+
+func TestKeyLifetimeCostSurvivesRetentionAndStaysOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	// Rates are micro-USD per million tokens.
+	s.pricing = pricing.NewStatic(map[string]pricing.Price{"synthetic-priced": {Input: 2_000_000, Cached: 500_000, Output: 8_000_000}})
+	member := runtimeMember(t, s)
+	result, err := s.db.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at,revoked_at) VALUES(1,1,'synthetic','sl_fake',randomblob(32),1,2)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := result.LastInsertId()
+	value := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	now := s.now().Unix()
+	for _, record := range []db.RecordRequestParams{
+		{Model: "synthetic-priced", InputTokens: value(1_000_000), OutputTokens: value(100_000), CachedTokens: value(400_000), StartedAt: now},
+		// Without a cache split, differing rates make only this request's input price unknown.
+		{Model: "synthetic-priced", InputTokens: value(1_000), OutputTokens: value(0), StartedAt: now},
+		{Model: "synthetic-unpriced", InputTokens: value(300), OutputTokens: value(50), CachedTokens: value(0), StartedAt: now},
+		{Model: "synthetic-priced", InputTokens: value(0), OutputTokens: value(1_000_000), CachedTokens: value(0), StartedAt: now - 120*86400},
+		{Model: "synthetic-priced", InputTokens: value(5), OutputTokens: value(5), StartedAt: now},
+	} {
+		record.UserID, record.GroupID, record.KeyID, record.Provider, record.Outcome = 1, 1, key, "codex", "success"
+		if record.InputTokens != nil && *record.InputTokens == 5 {
+			record.KeyID = 0
+		}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneHistory(ctx, s.db, s.now()); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := s.KeyUsage(ctx, 1, []int64{key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := usage.Keys[key]
+	if usage.TrackingSince <= 0 || got.EstimatedMicroUSD != 10_200_000 || got.UnpricedTokens != 1_350 || got.InputTokens != 1_001_300 || got.OutputTokens != 1_100_050 || got.Requests != 4 {
+		t.Fatal("inaccurate key lifetime cost", usage, got)
+	}
+	if other, err := s.KeyUsage(ctx, member, []int64{key}); err != nil || len(other.Keys) != 0 {
+		t.Fatal("key cost disclosed to another member", other, err)
+	}
+}
+
+func TestKeyUsageKeepsItsOwnBounds(t *testing.T) {
+	ctx := context.Background()
+	s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unexpected upstream"); return nil, nil }))
+	s.pricing = pricing.NewStatic(map[string]pricing.Price{"synthetic-priced": {Input: 1_000_000, Cached: 1_000_000, Output: 1_000_000}})
+	var keys []int64
+	for i := range 22 {
+		result, err := s.db.ExecContext(ctx, "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(1,1,?,'sl_fake',randomblob(32),1)", fmt.Sprintf("synthetic-%02d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		keys = append(keys, id)
+	}
+	value := func(v int64) *int64 { return &v }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	record := func(key int64, model string, at int64) {
+		r := db.RecordRequestParams{UserID: 1, KeyID: key, GroupID: 1, Provider: "codex", Model: model, StartedAt: at, Outcome: "success", InputTokens: value(1_000_000), OutputTokens: value(0), CachedTokens: value(0)}
+		if err := recordStatistics(ctx, s.queries.WithTx(tx), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := s.now().Unix()
+	// Browser-side traffic fills today's per-member model labels; the key's lifetime labels are separate.
+	for i := range 64 {
+		record(0, fmt.Sprintf("browser-%02d", i), now)
+	}
+	record(keys[0], "synthetic-priced", now)
+	for i := range 70 {
+		record(keys[0], fmt.Sprintf("synthetic-%02d", i), now-int64(1+i)*86400)
+	}
+	for _, key := range keys[1:] {
+		record(key, "synthetic-priced", now)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := s.KeyUsage(ctx, 1, keys[:1])
+	if err != nil || usage.Keys[keys[0]].Requests != 71 || usage.Keys[keys[0]].EstimatedMicroUSD != 1_000_000 {
+		t.Fatal("key lifetime usage lost its own model label", usage, err)
+	}
+	var labels int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM usage_lifetime_keys WHERE key_id=?", keys[0]).Scan(&labels); err != nil || labels != 65 {
+		t.Fatal("unbounded lifetime model labels", labels, err)
+	}
+	stats, err := s.Statistics(ctx, 1)
+	if err != nil || len(stats.Keys) != 20 {
+		t.Fatal("unbounded key ranking", len(stats.Keys), err)
 	}
 }

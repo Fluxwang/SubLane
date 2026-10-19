@@ -7,7 +7,27 @@ package db
 
 import (
 	"context"
+	"strings"
 )
+
+const canTrackKeyModel = `-- name: CanTrackKeyModel :one
+SELECT CAST(
+ EXISTS(SELECT 1 FROM usage_lifetime_keys known WHERE known.key_id=?1 AND known.model=?2)
+ OR (SELECT COUNT(*) FROM usage_lifetime_keys tracked WHERE tracked.key_id=?1 AND tracked.model!='[other models]')<64
+AS INTEGER)
+`
+
+type CanTrackKeyModelParams struct {
+	KeyID int64
+	Model string
+}
+
+func (q *Queries) CanTrackKeyModel(ctx context.Context, arg CanTrackKeyModelParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, canTrackKeyModel, arg.KeyID, arg.Model)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
 
 const canTrackStatisticsModel = `-- name: CanTrackStatisticsModel :one
 SELECT CAST(
@@ -37,6 +57,17 @@ func (q *Queries) CanTrackStatisticsModel(ctx context.Context, arg CanTrackStati
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const getKeyStatisticsCoverage = `-- name: GetKeyStatisticsCoverage :one
+SELECT value FROM settings WHERE key='usage.keys.started_at'
+`
+
+func (q *Queries) GetKeyStatisticsCoverage(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getKeyStatisticsCoverage)
+	var value string
+	err := row.Scan(&value)
+	return value, err
 }
 
 const getStatisticsCoverage = `-- name: GetStatisticsCoverage :one
@@ -117,6 +148,138 @@ func (q *Queries) GetStatisticsTotals(ctx context.Context, arg GetStatisticsTota
 	return i, err
 }
 
+const listKeyLifetimeUsage = `-- name: ListKeyLifetimeUsage :many
+SELECT l.key_id,l.model,l.requests,l.input_tokens,l.output_tokens,l.cached_tokens,l.unsplit_input_tokens,l.input_reported,l.output_reported
+FROM usage_lifetime_keys l JOIN api_keys k ON k.id=l.key_id JOIN account_groups g ON g.id=k.group_id
+WHERE k.user_id=?1 AND g.tenant_id=?2 AND l.key_id IN (/*SLICE:key_ids*/?)
+`
+
+type ListKeyLifetimeUsageParams struct {
+	UserID   int64
+	TenantID int64
+	KeyIds   []int64
+}
+
+func (q *Queries) ListKeyLifetimeUsage(ctx context.Context, arg ListKeyLifetimeUsageParams) ([]UsageLifetimeKey, error) {
+	query := listKeyLifetimeUsage
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.UserID)
+	queryParams = append(queryParams, arg.TenantID)
+	if len(arg.KeyIds) > 0 {
+		for _, v := range arg.KeyIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:key_ids*/?", strings.Repeat(",?", len(arg.KeyIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:key_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageLifetimeKey{}
+	for rows.Next() {
+		var i UsageLifetimeKey
+		if err := rows.Scan(
+			&i.KeyID,
+			&i.Model,
+			&i.Requests,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.UnsplitInputTokens,
+			&i.InputReported,
+			&i.OutputReported,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKeyStatistics = `-- name: ListKeyStatistics :many
+SELECT k.id, k.name, CAST(k.revoked_at IS NOT NULL AS INTEGER) AS revoked, COALESCE(u.username,'') AS owner,
+CAST(COALESCE(SUM(s.requests),0) AS INTEGER) AS requests,
+CAST(COALESCE(SUM(s.input_tokens),0) AS INTEGER) AS input_tokens,
+CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
+CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
+CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
+CAST(COALESCE(SUM(s.output_reported),0) AS INTEGER) AS output_reported,
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+FROM usage_daily_keys s JOIN api_keys k ON k.id=s.key_id JOIN account_groups g ON g.id=k.group_id LEFT JOIN users u ON u.id=k.user_id
+WHERE g.tenant_id=?1 AND s.day>=?2 AND s.day<?3 AND (k.user_id=?4 OR ?4=0)
+GROUP BY k.id ORDER BY SUM(s.input_tokens+s.output_tokens) DESC,requests DESC,k.id ASC LIMIT 20
+`
+
+type ListKeyStatisticsParams struct {
+	TenantID int64
+	FromDay  int64
+	ToDay    int64
+	UserID   int64
+}
+
+type ListKeyStatisticsRow struct {
+	ID             int64
+	Name           string
+	Revoked        int64
+	Owner          string
+	Requests       int64
+	InputTokens    int64
+	OutputTokens   int64
+	CachedTokens   int64
+	InputReported  int64
+	OutputReported int64
+	CachedReported int64
+}
+
+func (q *Queries) ListKeyStatistics(ctx context.Context, arg ListKeyStatisticsParams) ([]ListKeyStatisticsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listKeyStatistics,
+		arg.TenantID,
+		arg.FromDay,
+		arg.ToDay,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKeyStatisticsRow{}
+	for rows.Next() {
+		var i ListKeyStatisticsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Revoked,
+			&i.Owner,
+			&i.Requests,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.InputReported,
+			&i.OutputReported,
+			&i.CachedReported,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStatistics = `-- name: ListStatistics :many
 SELECT CAST(CASE ?1 WHEN 'day' THEN s.day WHEN 'member' THEN s.user_id WHEN 'group' THEN s.group_id ELSE s.model END AS TEXT) AS bucket,
 CAST(COALESCE(CASE ?1 WHEN 'day' THEN '' WHEN 'member' THEN u.username WHEN 'group' THEN g.name ELSE s.model END,'') AS TEXT) AS name,
@@ -132,10 +295,11 @@ CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
 CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
 CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
 CAST(COALESCE(SUM(s.output_reported),0) AS INTEGER) AS output_reported,
-CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported,
+CAST(COALESCE(CASE ?1 WHEN 'model' THEN SUM(s.input_tokens+s.output_tokens) ELSE SUM(s.requests) END,0) AS INTEGER) AS weight
 FROM usage_daily s LEFT JOIN users u ON u.id=s.user_id JOIN account_groups g ON g.id=s.group_id
 WHERE g.tenant_id=?2 AND s.day>=?3 AND s.day<?4 AND (s.user_id=?5 OR ?5=0)
-GROUP BY 1,2 ORDER BY requests DESC,bucket ASC LIMIT ?6
+GROUP BY 1,2 ORDER BY weight DESC,requests DESC,bucket ASC LIMIT ?6
 `
 
 type ListStatisticsParams struct {
@@ -163,8 +327,10 @@ type ListStatisticsRow struct {
 	InputReported  int64
 	OutputReported int64
 	CachedReported int64
+	Weight         int64
 }
 
+// Usage rankings order models by reported tokens; other dimensions stay request-ordered.
 func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) ([]ListStatisticsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listStatistics,
 		arg.Dimension,
@@ -197,6 +363,7 @@ func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) 
 			&i.InputReported,
 			&i.OutputReported,
 			&i.CachedReported,
+			&i.Weight,
 		); err != nil {
 			return nil, err
 		}
@@ -276,6 +443,18 @@ func (q *Queries) ListStatisticsCostBasis(ctx context.Context, arg ListStatistic
 	return items, nil
 }
 
+const pruneKeyStatistics = `-- name: PruneKeyStatistics :execrows
+DELETE FROM usage_daily_keys WHERE rowid IN (SELECT old.rowid FROM usage_daily_keys old WHERE old.day<?1 LIMIT 500)
+`
+
+func (q *Queries) PruneKeyStatistics(ctx context.Context, beforeDay int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneKeyStatistics, beforeDay)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const pruneStatistics = `-- name: PruneStatistics :execrows
 DELETE FROM usage_daily WHERE rowid IN (SELECT old.rowid FROM usage_daily old WHERE old.day<?1 LIMIT 500)
 `
@@ -286,6 +465,86 @@ func (q *Queries) PruneStatistics(ctx context.Context, beforeDay int64) (int64, 
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const recordKeyLifetimeUsage = `-- name: RecordKeyLifetimeUsage :exec
+INSERT INTO usage_lifetime_keys(key_id,model,requests,input_tokens,output_tokens,cached_tokens,unsplit_input_tokens,input_reported,output_reported)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+ON CONFLICT(key_id,model) DO UPDATE SET
+requests=usage_lifetime_keys.requests+excluded.requests,
+input_tokens=usage_lifetime_keys.input_tokens+excluded.input_tokens,
+output_tokens=usage_lifetime_keys.output_tokens+excluded.output_tokens,
+cached_tokens=usage_lifetime_keys.cached_tokens+excluded.cached_tokens,
+unsplit_input_tokens=usage_lifetime_keys.unsplit_input_tokens+excluded.unsplit_input_tokens,
+input_reported=usage_lifetime_keys.input_reported+excluded.input_reported,
+output_reported=usage_lifetime_keys.output_reported+excluded.output_reported
+`
+
+type RecordKeyLifetimeUsageParams struct {
+	KeyID              int64
+	Model              string
+	Requests           int64
+	InputTokens        int64
+	OutputTokens       int64
+	CachedTokens       int64
+	UnsplitInputTokens int64
+	InputReported      int64
+	OutputReported     int64
+}
+
+func (q *Queries) RecordKeyLifetimeUsage(ctx context.Context, arg RecordKeyLifetimeUsageParams) error {
+	_, err := q.db.ExecContext(ctx, recordKeyLifetimeUsage,
+		arg.KeyID,
+		arg.Model,
+		arg.Requests,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedTokens,
+		arg.UnsplitInputTokens,
+		arg.InputReported,
+		arg.OutputReported,
+	)
+	return err
+}
+
+const recordKeyStatistics = `-- name: RecordKeyStatistics :exec
+INSERT INTO usage_daily_keys(day,key_id,requests,input_tokens,output_tokens,cached_tokens,input_reported,output_reported,cached_reported)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+ON CONFLICT(day,key_id) DO UPDATE SET
+requests=usage_daily_keys.requests+excluded.requests,
+input_tokens=usage_daily_keys.input_tokens+excluded.input_tokens,
+output_tokens=usage_daily_keys.output_tokens+excluded.output_tokens,
+cached_tokens=usage_daily_keys.cached_tokens+excluded.cached_tokens,
+input_reported=usage_daily_keys.input_reported+excluded.input_reported,
+output_reported=usage_daily_keys.output_reported+excluded.output_reported,
+cached_reported=usage_daily_keys.cached_reported+excluded.cached_reported
+`
+
+type RecordKeyStatisticsParams struct {
+	Day            int64
+	KeyID          int64
+	Requests       int64
+	InputTokens    int64
+	OutputTokens   int64
+	CachedTokens   int64
+	InputReported  int64
+	OutputReported int64
+	CachedReported int64
+}
+
+func (q *Queries) RecordKeyStatistics(ctx context.Context, arg RecordKeyStatisticsParams) error {
+	_, err := q.db.ExecContext(ctx, recordKeyStatistics,
+		arg.Day,
+		arg.KeyID,
+		arg.Requests,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedTokens,
+		arg.InputReported,
+		arg.OutputReported,
+		arg.CachedReported,
+	)
+	return err
 }
 
 const recordStatistics = `-- name: RecordStatistics :exec

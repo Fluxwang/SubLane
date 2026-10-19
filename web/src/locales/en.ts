@@ -834,6 +834,14 @@ export const en = {
   usageTokenConsumption: 'Tokens consumed',
   usageCacheHitRate: 'Cache hit rate',
   usageTokenSplit: 'In {{input}} · Out {{output}}',
+  usageRanking: 'Usage ranking',
+  usageRankingByTokens: 'By tokens',
+  usageRankingEmpty: 'No reported token usage in this period.',
+  usageRankingExpand: 'Show all {{count}}',
+  usageRankingCollapse: 'Show less',
+  usageRankingDimension: 'Ranking dimension',
+  usageKeyTrackingSince:
+    'API key usage is recorded from {{time}} ({{zone}}); earlier usage is not attributed to keys.',
   usageTrend: 'Usage trend',
   usageMetricTokens: 'Tokens',
   usageMetricCost: 'Cost',
@@ -1117,6 +1125,11 @@ export const en = {
   noUsableKeys: 'No usable keys ({{count}} revoked)',
   noUsableKeysDescription:
     'Show your revoked keys to view them, or create a new key.',
+  keyCost: 'Cost',
+  keyCostNote: 'Costs are estimated with current prices since {{date}}.',
+  keyCostUnpriced:
+    'Some usage is for models without a price and is not included.',
+  keyLifetimeTokens: '{{value}} tokens',
   keyLastUsed: 'Last used',
   neverUsed: 'Never',
   revoked: 'Revoked',

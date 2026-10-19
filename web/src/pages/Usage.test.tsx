@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryHistory } from '@tanstack/react-router'
 import { expect, it, vi } from 'vitest'
@@ -39,6 +39,8 @@ const summary = {
     { id: 'codex/synthetic-model', name: 'codex/synthetic-model', ...metrics },
   ],
   groups: [],
+  keys: [],
+  key_tracking_since: 1900000000,
   cost: {
     estimated_micro_usd: 0,
     unpriced_tokens: 0,
@@ -138,8 +140,9 @@ it.each([
     await user.click(screen.getByRole('button', { name: 'Breakdown' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Models' }))
     await user.click(screen.getByRole('button', { name: 'View details' }))
-    expect(screen.getByRole('table', { name: 'Models' })).toBeTruthy()
-    await screen.findByText('codex/synthetic-model')
+    await within(screen.getByRole('table', { name: 'Models' })).findByText(
+      'codex/synthetic-model',
+    )
     expect(
       screen.getByRole('region', { name: 'Activity by time' }),
     ).toBeTruthy()
@@ -349,4 +352,125 @@ it('summarizes cost, requests, tokens, and cache hits and toggles exact token va
   ).toBeTruthy()
   await user.click(screen.getByRole('button', { name: 'Cost', pressed: false }))
   expect(screen.getByRole('img', { name: 'Usage trend · Cost' })).toBeTruthy()
+})
+
+it('ranks models by reported tokens beside the usage trend and expands in place', async () => {
+  const model = (name: string, input: number, output: number) => ({
+    id: name,
+    name,
+    ...metrics,
+    input_tokens: input,
+    output_tokens: output,
+  })
+  const models = [
+    model('codex/heavy', 900_000, 100_000),
+    model('[other models]', 50_000, 0),
+    model('codex/mid', 30_000, 0),
+    model('codex/small-a', 10_000, 0),
+    model('codex/small-b', 6_000, 0),
+    model('codex/small-c', 4_000, 0),
+    { ...model('codex/silent', 0, 0), input_reported: 0, output_reported: 0 },
+  ]
+  const fetch = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(new Response(JSON.stringify(authenticated)))
+    if (url === '/api/workspaces')
+      return Promise.resolve(new Response(JSON.stringify(workspaces)))
+    if (url === '/api/connection')
+      return Promise.resolve(new Response(JSON.stringify({ status: 'ready' })))
+    if (url.startsWith('/api/usage?'))
+      return Promise.resolve(
+        new Response(JSON.stringify({ ...summary, models })),
+      )
+    return Promise.reject(new Error('Unexpected request ' + url))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(
+    <App
+      router={createAppRouter(
+        createMemoryHistory({ initialEntries: ['/admin/usage'] }),
+      )}
+    />,
+  )
+  const ranking = await screen.findByRole('region', { name: 'Usage ranking' })
+  const rows = () => within(ranking).getAllByRole('listitem')
+  expect(rows()).toHaveLength(5)
+  expect(rows()[0].textContent).toContain('codex/heavy')
+  expect(rows()[0].textContent).toContain('1M')
+  expect(rows()[0].textContent).toContain('90.9%')
+  expect(rows()[1].textContent).toContain('Other models')
+  expect(rows()[1].textContent).toContain('4.5%')
+  await user.click(within(ranking).getByRole('button', { name: 'Show all 6' }))
+  expect(rows()).toHaveLength(6)
+  expect(ranking.textContent).not.toContain('codex/silent')
+  await user.click(within(ranking).getByRole('button', { name: 'Show less' }))
+  expect(rows()).toHaveLength(5)
+})
+
+it('switches the ranking to API keys with owners, revoked labels, and the key tracking start', async () => {
+  const key = (id: string, name: string, input: number, extra = {}) => ({
+    id,
+    name,
+    revoked: false,
+    requests: 1,
+    input_tokens: input,
+    output_tokens: 0,
+    cached_tokens: 0,
+    input_reported: 1,
+    output_reported: 1,
+    cached_reported: 0,
+    ...extra,
+  })
+  const fetch = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(new Response(JSON.stringify(authenticated)))
+    if (url === '/api/workspaces')
+      return Promise.resolve(new Response(JSON.stringify(workspaces)))
+    if (url === '/api/connection')
+      return Promise.resolve(new Response(JSON.stringify({ status: 'ready' })))
+    if (url.startsWith('/api/usage?'))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...summary,
+            key_tracking_since: 1900003600,
+            keys: [
+              key('4', 'ci-runner', 750, { owner: 'synthetic-member' }),
+              key('2', 'old-laptop', 250, {
+                owner: 'synthetic-admin',
+                revoked: true,
+              }),
+            ],
+          }),
+        ),
+      )
+    return Promise.reject(new Error('Unexpected request ' + url))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(
+    <App
+      router={createAppRouter(
+        createMemoryHistory({ initialEntries: ['/admin/usage'] }),
+      )}
+    />,
+  )
+  const ranking = await screen.findByRole('region', { name: 'Usage ranking' })
+  expect(
+    within(ranking)
+      .getByRole('button', { name: 'Models' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  await user.click(within(ranking).getByRole('button', { name: 'API keys' }))
+  const rows = within(ranking).getAllByRole('listitem')
+  expect(rows).toHaveLength(2)
+  expect(rows[0].textContent).toContain('ci-runner')
+  expect(rows[0].textContent).toContain('synthetic-member')
+  expect(rows[0].textContent).toContain('75%')
+  expect(rows[1].textContent).toContain('old-laptop')
+  expect(rows[1].textContent).toContain('Revoked')
+  expect(
+    within(ranking).getByText(/API key usage is recorded from/).textContent,
+  ).toContain('2030')
 })
