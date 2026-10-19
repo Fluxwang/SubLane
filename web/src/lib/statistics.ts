@@ -23,6 +23,19 @@ const statisticSchema = metricsSchema.extend({
   id: z.string(),
   name: z.string(),
 })
+const keyStatisticSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  owner: z.string().optional(),
+  revoked: z.boolean(),
+  requests: z.number().int().nonnegative(),
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+  cached_tokens: z.number().int().nonnegative(),
+  input_reported: z.number().int().nonnegative(),
+  output_reported: z.number().int().nonnegative(),
+  cached_reported: z.number().int().nonnegative(),
+})
 const activityCellSchema = z
   .object({
     weekday: z.number().int().min(0).max(6),
@@ -61,6 +74,8 @@ const statisticsSchema = z.object({
   members: z.array(statisticSchema).max(20),
   models: z.array(statisticSchema).max(20),
   groups: z.array(statisticSchema).max(20),
+  keys: z.array(keyStatisticSchema).max(20),
+  key_tracking_since: z.number().int(),
   activity: activitySchema,
   cost: z.object({
     estimated_micro_usd: z.number().int().nonnegative(),

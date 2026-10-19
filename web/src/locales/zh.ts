@@ -766,6 +766,9 @@ export const zh: Record<keyof typeof en, string> = {
   usageRankingEmpty: '此期间没有已上报的 Token 用量。',
   usageRankingExpand: '查看全部 {{count}} 项',
   usageRankingCollapse: '收起',
+  usageRankingDimension: '排行维度',
+  usageKeyTrackingSince:
+    'API Key 用量自 {{time}}（{{zone}}）起记录，此前的用量不归属任何 Key。',
   usageTrend: '使用趋势',
   usageMetricTokens: 'Tokens',
   usageMetricCost: '成本',

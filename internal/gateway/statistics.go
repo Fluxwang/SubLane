@@ -41,8 +41,26 @@ type Statistics struct {
 	Members       []Statistic `json:"members"`
 	Models        []Statistic `json:"models"`
 	Groups        []Statistic `json:"groups"`
-	Activity      Activity    `json:"activity"`
-	Cost          CostSummary `json:"cost"`
+	// Keys cover only usage since KeyTrackingSince; earlier usage is attributed to no key.
+	Keys             []KeyStatistic `json:"keys"`
+	KeyTrackingSince int64          `json:"key_tracking_since"`
+	Activity         Activity       `json:"activity"`
+	Cost             CostSummary    `json:"cost"`
+}
+
+// KeyStatistic carries the owner's username only in workspace-wide statistics.
+type KeyStatistic struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Owner          string `json:"owner,omitempty"`
+	Revoked        bool   `json:"revoked"`
+	Requests       int64  `json:"requests"`
+	InputTokens    int64  `json:"input_tokens"`
+	OutputTokens   int64  `json:"output_tokens"`
+	CachedTokens   int64  `json:"cached_tokens"`
+	InputReported  int64  `json:"input_reported"`
+	OutputReported int64  `json:"output_reported"`
+	CachedReported int64  `json:"cached_reported"`
 }
 
 // CostSummary is a current-catalog estimate; allowance debits use their saved revision prices.
@@ -71,7 +89,7 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 	}
 	now := s.now().UTC()
 	today := now.Truncate(24 * time.Hour).Unix()
-	page := Statistics{FromDay: today - (days-1)*86400, ToDay: today + 86400, Days: []Statistic{}, Members: []Statistic{}, Models: []Statistic{}, Groups: []Statistic{}}
+	page := Statistics{FromDay: today - (days-1)*86400, ToDay: today + 86400, Days: []Statistic{}, Members: []Statistic{}, Models: []Statistic{}, Groups: []Statistic{}, Keys: []KeyStatistic{}}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return page, err
@@ -90,6 +108,13 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 	// Parse metadata explicitly: SQLite CAST would turn invalid text into a misleading zero.
 	page.TrackingSince, err = strconv.ParseInt(coverage, 10, 64)
 	if err != nil {
+		return page, err
+	}
+	keyCoverage, err := q.GetKeyStatisticsCoverage(ctx)
+	if err != nil {
+		return page, err
+	}
+	if page.KeyTrackingSince, err = strconv.ParseInt(keyCoverage, 10, 64); err != nil {
 		return page, err
 	}
 	totals, err := q.GetStatisticsTotals(ctx, db.GetStatisticsTotalsParams{TenantID: s.tenantID, FromDay: page.FromDay, ToDay: page.ToDay, UserID: userID})
@@ -131,6 +156,17 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 	}
 	if page.Groups, err = list("group", 20); err != nil {
 		return page, err
+	}
+	keys, err := q.ListKeyStatistics(ctx, db.ListKeyStatisticsParams{TenantID: s.tenantID, FromDay: page.FromDay, ToDay: page.ToDay, UserID: userID})
+	if err != nil {
+		return page, err
+	}
+	for _, k := range keys {
+		row := KeyStatistic{ID: strconv.FormatInt(k.ID, 10), Name: k.Name, Revoked: k.Revoked != 0, Requests: k.Requests, InputTokens: k.InputTokens, OutputTokens: k.OutputTokens, CachedTokens: k.CachedTokens, InputReported: k.InputReported, OutputReported: k.OutputReported, CachedReported: k.CachedReported}
+		if userID == 0 {
+			row.Owner = k.Owner
+		}
+		page.Keys = append(page.Keys, row)
 	}
 	if userID == 0 {
 		if page.Members, err = list("member", 20); err != nil {
@@ -237,6 +273,11 @@ func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestPara
 	}
 	if err := q.RecordStatistics(ctx, entry); err != nil {
 		return err
+	}
+	if r.KeyID > 0 {
+		if err := q.RecordKeyStatistics(ctx, db.RecordKeyStatisticsParams{Day: entry.Day, KeyID: r.KeyID, Requests: entry.Requests, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, CachedTokens: entry.CachedTokens, InputReported: entry.InputReported, OutputReported: entry.OutputReported, CachedReported: entry.CachedReported}); err != nil {
+			return err
+		}
 	}
 	return q.RecordHourlyUsage(ctx, db.RecordHourlyUsageParams{GroupID: r.GroupID, Hour: r.StartedAt - r.StartedAt%3600, UserID: r.UserID, Requests: entry.Requests, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, InputReported: entry.InputReported, OutputReported: entry.OutputReported})
 }

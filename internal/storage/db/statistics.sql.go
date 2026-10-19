@@ -39,6 +39,17 @@ func (q *Queries) CanTrackStatisticsModel(ctx context.Context, arg CanTrackStati
 	return column_1, err
 }
 
+const getKeyStatisticsCoverage = `-- name: GetKeyStatisticsCoverage :one
+SELECT value FROM settings WHERE key='usage.keys.started_at'
+`
+
+func (q *Queries) GetKeyStatisticsCoverage(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getKeyStatisticsCoverage)
+	var value string
+	err := row.Scan(&value)
+	return value, err
+}
+
 const getStatisticsCoverage = `-- name: GetStatisticsCoverage :one
 SELECT value FROM settings WHERE key='usage.daily.started_at'
 `
@@ -115,6 +126,81 @@ func (q *Queries) GetStatisticsTotals(ctx context.Context, arg GetStatisticsTota
 		&i.CachedReported,
 	)
 	return i, err
+}
+
+const listKeyStatistics = `-- name: ListKeyStatistics :many
+SELECT k.id, k.name, CAST(k.revoked_at IS NOT NULL AS INTEGER) AS revoked, COALESCE(u.username,'') AS owner,
+CAST(COALESCE(SUM(s.requests),0) AS INTEGER) AS requests,
+CAST(COALESCE(SUM(s.input_tokens),0) AS INTEGER) AS input_tokens,
+CAST(COALESCE(SUM(s.output_tokens),0) AS INTEGER) AS output_tokens,
+CAST(COALESCE(SUM(s.cached_tokens),0) AS INTEGER) AS cached_tokens,
+CAST(COALESCE(SUM(s.input_reported),0) AS INTEGER) AS input_reported,
+CAST(COALESCE(SUM(s.output_reported),0) AS INTEGER) AS output_reported,
+CAST(COALESCE(SUM(s.cached_reported),0) AS INTEGER) AS cached_reported
+FROM usage_daily_keys s JOIN api_keys k ON k.id=s.key_id JOIN account_groups g ON g.id=k.group_id LEFT JOIN users u ON u.id=k.user_id
+WHERE g.tenant_id=?1 AND s.day>=?2 AND s.day<?3 AND (k.user_id=?4 OR ?4=0)
+GROUP BY k.id ORDER BY SUM(s.input_tokens+s.output_tokens) DESC,requests DESC,k.id ASC LIMIT 20
+`
+
+type ListKeyStatisticsParams struct {
+	TenantID int64
+	FromDay  int64
+	ToDay    int64
+	UserID   int64
+}
+
+type ListKeyStatisticsRow struct {
+	ID             int64
+	Name           string
+	Revoked        int64
+	Owner          string
+	Requests       int64
+	InputTokens    int64
+	OutputTokens   int64
+	CachedTokens   int64
+	InputReported  int64
+	OutputReported int64
+	CachedReported int64
+}
+
+func (q *Queries) ListKeyStatistics(ctx context.Context, arg ListKeyStatisticsParams) ([]ListKeyStatisticsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listKeyStatistics,
+		arg.TenantID,
+		arg.FromDay,
+		arg.ToDay,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKeyStatisticsRow{}
+	for rows.Next() {
+		var i ListKeyStatisticsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Revoked,
+			&i.Owner,
+			&i.Requests,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.InputReported,
+			&i.OutputReported,
+			&i.CachedReported,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listStatistics = `-- name: ListStatistics :many
@@ -280,6 +366,18 @@ func (q *Queries) ListStatisticsCostBasis(ctx context.Context, arg ListStatistic
 	return items, nil
 }
 
+const pruneKeyStatistics = `-- name: PruneKeyStatistics :execrows
+DELETE FROM usage_daily_keys WHERE rowid IN (SELECT old.rowid FROM usage_daily_keys old WHERE old.day<?1 LIMIT 500)
+`
+
+func (q *Queries) PruneKeyStatistics(ctx context.Context, beforeDay int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneKeyStatistics, beforeDay)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const pruneStatistics = `-- name: PruneStatistics :execrows
 DELETE FROM usage_daily WHERE rowid IN (SELECT old.rowid FROM usage_daily old WHERE old.day<?1 LIMIT 500)
 `
@@ -290,6 +388,46 @@ func (q *Queries) PruneStatistics(ctx context.Context, beforeDay int64) (int64, 
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const recordKeyStatistics = `-- name: RecordKeyStatistics :exec
+INSERT INTO usage_daily_keys(day,key_id,requests,input_tokens,output_tokens,cached_tokens,input_reported,output_reported,cached_reported)
+VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+ON CONFLICT(day,key_id) DO UPDATE SET
+requests=usage_daily_keys.requests+excluded.requests,
+input_tokens=usage_daily_keys.input_tokens+excluded.input_tokens,
+output_tokens=usage_daily_keys.output_tokens+excluded.output_tokens,
+cached_tokens=usage_daily_keys.cached_tokens+excluded.cached_tokens,
+input_reported=usage_daily_keys.input_reported+excluded.input_reported,
+output_reported=usage_daily_keys.output_reported+excluded.output_reported,
+cached_reported=usage_daily_keys.cached_reported+excluded.cached_reported
+`
+
+type RecordKeyStatisticsParams struct {
+	Day            int64
+	KeyID          int64
+	Requests       int64
+	InputTokens    int64
+	OutputTokens   int64
+	CachedTokens   int64
+	InputReported  int64
+	OutputReported int64
+	CachedReported int64
+}
+
+func (q *Queries) RecordKeyStatistics(ctx context.Context, arg RecordKeyStatisticsParams) error {
+	_, err := q.db.ExecContext(ctx, recordKeyStatistics,
+		arg.Day,
+		arg.KeyID,
+		arg.Requests,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedTokens,
+		arg.InputReported,
+		arg.OutputReported,
+		arg.CachedReported,
+	)
+	return err
 }
 
 const recordStatistics = `-- name: RecordStatistics :exec

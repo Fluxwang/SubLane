@@ -839,6 +839,9 @@ export const en = {
   usageRankingEmpty: 'No reported token usage in this period.',
   usageRankingExpand: 'Show all {{count}}',
   usageRankingCollapse: 'Show less',
+  usageRankingDimension: 'Ranking dimension',
+  usageKeyTrackingSince:
+    'API key usage is recorded from {{time}} ({{zone}}); earlier usage is not attributed to keys.',
   usageTrend: 'Usage trend',
   usageMetricTokens: 'Tokens',
   usageMetricCost: 'Cost',

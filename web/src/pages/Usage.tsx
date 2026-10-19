@@ -13,6 +13,7 @@ import type { en } from '@/locales/en'
 import { Button } from '@/components/ui/Button'
 import { UsageChart } from '@/components/UsageChart'
 import { UsageRanking } from '@/components/UsageRanking'
+import { Status } from '@/components/Status'
 import { PersonalAllocations } from '@/components/PersonalAllocations'
 import { ActivityMap } from '@/components/ActivityMap'
 import {
@@ -57,6 +58,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
   const [metric, setMetric] = useState<UsageMetric>('tokens')
   const [showDetails, setShowDetails] = useState(false)
   const [exactTokens, setExactTokens] = useState(false)
+  const [ranking, setRanking] = useState<'models' | 'keys'>('models')
   const [view, setView] = useState<'days' | 'models' | 'groups' | 'members'>(
     'days',
   )
@@ -432,11 +434,59 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
                   </section>
                   <UsageRanking
                     key={days}
-                    items={query.data.models.map((row) => ({
-                      id: row.id,
-                      name: labelName(row),
-                      tokens: row.input_tokens + row.output_tokens,
-                    }))}
+                    items={
+                      ranking === 'models'
+                        ? query.data.models.map((row) => ({
+                            id: row.id,
+                            name: labelName(row),
+                            tokens: row.input_tokens + row.output_tokens,
+                          }))
+                        : query.data.keys.map((row) => ({
+                            id: row.id,
+                            name: row.name,
+                            tokens: row.input_tokens + row.output_tokens,
+                            detail: (row.owner || row.revoked) && (
+                              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                {row.owner}
+                                {row.revoked && (
+                                  <Status kind="neutral">{t('revoked')}</Status>
+                                )}
+                              </span>
+                            ),
+                          }))
+                    }
+                    controls={
+                      <div
+                        role="group"
+                        aria-label={t('usageRankingDimension')}
+                        className="flex rounded-lg bg-muted p-1"
+                      >
+                        {(['models', 'keys'] as const).map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={ranking === value}
+                            onClick={() => setRanking(value)}
+                            className="rounded-md px-3 py-1 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-card aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm"
+                          >
+                            {t(value === 'models' ? 'usageModels' : 'apiKeys')}
+                          </button>
+                        ))}
+                      </div>
+                    }
+                    notice={
+                      ranking === 'keys' &&
+                      query.data.key_tracking_since > query.data.from_day && (
+                        <p className="mb-4 text-xs text-muted-foreground">
+                          {t('usageKeyTrackingSince', {
+                            time: timestamp.format(
+                              query.data.key_tracking_since * 1000,
+                            ),
+                            zone: timeZone,
+                          })}
+                        </p>
+                      )
+                    }
                     formatTokens={(tokens) => tokenToggle([tokens])}
                   />
                 </div>

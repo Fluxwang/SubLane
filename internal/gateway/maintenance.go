@@ -40,6 +40,7 @@ func pruneHistory(ctx context.Context, connection *sql.DB, now time.Time) error 
 			return allocations.Prune(ctx, q, now.Add(-90*24*time.Hour).Unix())
 		},
 		func(ctx context.Context) (int64, error) { return q.PruneStatistics(ctx, today-89*86400) },
+		func(ctx context.Context) (int64, error) { return q.PruneKeyStatistics(ctx, today-89*86400) },
 		func(ctx context.Context) (int64, error) { return q.PruneHourlyUsage(ctx, today-89*86400) },
 		func(ctx context.Context) (int64, error) { return q.PruneRequests(ctx, now.Add(-7*24*time.Hour).Unix()) },
 	}

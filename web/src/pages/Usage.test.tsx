@@ -39,6 +39,8 @@ const summary = {
     { id: 'codex/synthetic-model', name: 'codex/synthetic-model', ...metrics },
   ],
   groups: [],
+  keys: [],
+  key_tracking_since: 1900000000,
   cost: {
     estimated_micro_usd: 0,
     unpriced_tokens: 0,
@@ -404,4 +406,71 @@ it('ranks models by reported tokens beside the usage trend and expands in place'
   expect(ranking.textContent).not.toContain('codex/silent')
   await user.click(within(ranking).getByRole('button', { name: 'Show less' }))
   expect(rows()).toHaveLength(5)
+})
+
+it('switches the ranking to API keys with owners, revoked labels, and the key tracking start', async () => {
+  const key = (id: string, name: string, input: number, extra = {}) => ({
+    id,
+    name,
+    revoked: false,
+    requests: 1,
+    input_tokens: input,
+    output_tokens: 0,
+    cached_tokens: 0,
+    input_reported: 1,
+    output_reported: 1,
+    cached_reported: 0,
+    ...extra,
+  })
+  const fetch = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(new Response(JSON.stringify(authenticated)))
+    if (url === '/api/workspaces')
+      return Promise.resolve(new Response(JSON.stringify(workspaces)))
+    if (url === '/api/connection')
+      return Promise.resolve(new Response(JSON.stringify({ status: 'ready' })))
+    if (url.startsWith('/api/usage?'))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...summary,
+            key_tracking_since: 1900003600,
+            keys: [
+              key('4', 'ci-runner', 750, { owner: 'synthetic-member' }),
+              key('2', 'old-laptop', 250, {
+                owner: 'synthetic-admin',
+                revoked: true,
+              }),
+            ],
+          }),
+        ),
+      )
+    return Promise.reject(new Error('Unexpected request ' + url))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(
+    <App
+      router={createAppRouter(
+        createMemoryHistory({ initialEntries: ['/admin/usage'] }),
+      )}
+    />,
+  )
+  const ranking = await screen.findByRole('region', { name: 'Usage ranking' })
+  expect(
+    within(ranking)
+      .getByRole('button', { name: 'Models' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  await user.click(within(ranking).getByRole('button', { name: 'API keys' }))
+  const rows = within(ranking).getAllByRole('listitem')
+  expect(rows).toHaveLength(2)
+  expect(rows[0].textContent).toContain('ci-runner')
+  expect(rows[0].textContent).toContain('synthetic-member')
+  expect(rows[0].textContent).toContain('75%')
+  expect(rows[1].textContent).toContain('old-laptop')
+  expect(rows[1].textContent).toContain('Revoked')
+  expect(
+    within(ranking).getByText(/API key usage is recorded from/).textContent,
+  ).toContain('2030')
 })
