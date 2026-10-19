@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/gorilla/websocket v1.5.3
-	github.com/router-for-me/CLIProxyAPI/v7 v7.3.7
+	github.com/router-for-me/CLIProxyAPI/v8 v8.0.35
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0

@@ -20,12 +20,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/murongg/SubLane/internal/accounts"
-	sdkapi "github.com/router-for-me/CLIProxyAPI/v7/sdk/api"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy"
-	core "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	sdkapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
+	core "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	"github.com/sirupsen/logrus"
 )
 
@@ -84,7 +84,7 @@ func (c *Client) startEngine(parent context.Context, claudeVersions ...string) (
 	if len(claudeVersions) != 0 {
 		claudeVersion = claudeVersions[0]
 	}
-	configureClaudeSDK(cfg, claudeVersion)
+	cfg.ClaudeHeaderDefaults.UserAgent = claudeUserAgent(claudeVersion)
 	// Preserve caller tool definitions; do not inject an image tool into every coding request.
 	if err := json.Unmarshal([]byte(`"passthrough"`), &cfg.DisableImageGeneration); err != nil {
 		return fail(err)
@@ -112,8 +112,8 @@ func (c *Client) startEngine(parent context.Context, claudeVersions ...string) (
 	if err != nil {
 		return fail(err)
 	}
-	// v7's startup hook does not synchronize its listener fields. An in-process handler
-	// handshake establishes readiness before cancellation may trigger SDK shutdown.
+	// The SDK's startup hook does not guarantee listener readiness. Complete an
+	// in-process handler handshake before cancellation may trigger SDK shutdown.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	rt := &sdkRuntime{manager: manager, address: address, cancel: cancel, done: make(chan error, 1), dir: dir}
 	go func() { err := svc.Run(ctx); os.RemoveAll(dir); rt.done <- err; close(rt.done) }()

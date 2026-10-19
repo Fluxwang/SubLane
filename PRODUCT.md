@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-A modular Go monolith with chi, sqlc-generated database queries, SQLite, and an embedded static frontend. The frontend uses the user-selected Shadcn Admin, React, TypeScript, Vite, TanStack Router, and TanStack Query. A provider adapter reuses CLIProxyAPI v7.3.7’s built-in executors while SubLane owns OAuth, encrypted storage, refresh, account selection, and the public HTTP boundary.
+A modular Go monolith with chi, sqlc-generated database queries, SQLite, and an embedded static frontend. The frontend uses the user-selected Shadcn Admin, React, TypeScript, Vite, TanStack Router, and TanStack Query. A provider adapter reuses CLIProxyAPI v8.0.35’s built-in executors while SubLane owns OAuth, encrypted storage, refresh, account selection, and the public HTTP boundary.
 
 ## Users
 

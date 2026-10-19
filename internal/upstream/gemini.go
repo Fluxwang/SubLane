@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 )
 
 func GeminiRequest(raw []byte, model string, maxRequestBody ...int64) ([]byte, error) {

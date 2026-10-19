@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	sdkauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 )
 
 func (c *Client) claudeUsage(ctx context.Context, credential accounts.Credential) (Usage, error) {

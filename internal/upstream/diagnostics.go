@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/murongg/SubLane/internal/logging"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 var diagnosticRequestID = regexp.MustCompile(`^(req_[a-zA-Z0-9_-]{1,124}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$`)

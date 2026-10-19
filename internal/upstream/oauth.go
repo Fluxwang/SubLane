@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	sdkauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	sdkauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 )
 
-// Public installed-app OAuth parameters match CLIProxyAPI v7.3.7's MIT-licensed provider adapters.
+// Public installed-app OAuth parameters match the pinned SDK's MIT-licensed provider adapters.
 // Web state/PKCE and durable storage remain owned by SubLane rather than the SDK's CLI login flow.
 const claudeClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 

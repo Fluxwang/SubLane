@@ -39,7 +39,7 @@ The Radix dropdown menu is pinned to 2.1.16 alongside Dialog 1.1.15 so they shar
 ## CLIProxyAPI
 
 - Project: https://github.com/router-for-me/CLIProxyAPI
-- Version: `v7.3.7` (pinned in `go.mod` and `go.sum`).
+- Version: `v8.0.35` (pinned in `go.mod` and `go.sum`).
 - License: MIT; full text in `licenses/cliproxyapi.txt`.
 - Integration: public `sdk/cliproxy`, auth/executor interfaces, `sdk/auth` Antigravity helpers, `sdk/api`, `sdk/config`, and translator packages. SubLane retains OAuth state, encrypted persistence, refresh orchestration, routing, and transport ownership. Codex/Claude OAuth parameters and provider metadata handling are adapted from this version’s MIT-licensed sources. Antigravity authorization and refresh reuse public SDK interfaces; Google installed-app client credentials are not duplicated in SubLane source.
 - The SDK starts an internal loopback HTTP listener with all routes blocked, an empty credential registry, a no-op watcher, and automatic refresh disabled. Its CLI, management panel, Home mode, and Redis service are not enabled.
