@@ -15,8 +15,9 @@ Usage, operations, and architecture guides are maintained in [the documentation 
 
 ## Releases
 
-- Publishing a version is not complete until `CHANGELOG.md` includes that tag. The tag workflow generates GitHub Release notes but does not update the repository file.
-- After the release workflow succeeds, use `git-cliff 2.14.2` to run `make changelog-check` and `make changelog`. Review the new version section and comparison link, then commit the changelog and merge it into `main`.
+- Before creating a release tag, use `git-cliff 2.14.2` to run `make changelog-check` and generate a versioned `CHANGELOG.md`. Review the new version section and comparison link, then commit and merge the changelog into `main`.
+- Generate a planned version without creating its Git tag with `git-cliff --config cliff.toml --offline --no-exec --use-branch-tags --tag vX.Y.Z --output CHANGELOG.md`, replacing `vX.Y.Z` with the unused release tag.
+- Publish only from clean, synchronized `main` containing that changelog. After the Release workflow succeeds, verify the published assets. The tag workflow generates GitHub Release notes but does not update the repository changelog.
 
 ## Boundaries
 

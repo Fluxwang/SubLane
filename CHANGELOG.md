@@ -2,6 +2,16 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.8.0] - 2026-10-19
+
+### Added
+
+- Unify table pagination and scrolling (#92)
+
+### Changed
+
+- Upgrade CLIProxyAPI to v8.0.35 (#93)
+
 ## [0.7.3] - 2026-10-19
 
 ### Fixed
@@ -213,6 +223,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.8.0]: https://github.com/murongg/SubLane/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/murongg/SubLane/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/murongg/SubLane/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/murongg/SubLane/compare/v0.7.0...v0.7.1

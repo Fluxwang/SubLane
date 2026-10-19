@@ -37,4 +37,12 @@ Usage, operations, and architecture guides are maintained in [sublane-website](h
 
 ## Publishing a version
 
-After `make publish TAG=v...` succeeds, wait for the Release workflow and verify the published assets. The workflow generates GitHub Release notes but does not update `CHANGELOG.md`. With `git-cliff 2.14.2`, run `make changelog-check` and `make changelog`, review the new version section and comparison link, then commit the updated changelog and merge it into `main`. The release is not finished until the repository changelog is updated.
+Choose an unused release tag. Before creating it, use `git-cliff 2.14.2` to run `make changelog-check` and generate the versioned changelog below, replacing `vX.Y.Z` with the chosen tag:
+
+```sh
+git-cliff --config cliff.toml --offline --no-exec --use-branch-tags --tag vX.Y.Z --output CHANGELOG.md
+```
+
+Review the new version section and comparison link, then commit the updated `CHANGELOG.md` and merge it into `main` through the normal PR flow. The generator labels the planned release without creating a Git tag.
+
+On clean, synchronized `main` containing that changelog, run `make publish-check TAG=vX.Y.Z` and `make publish TAG=vX.Y.Z`. Wait for the Release workflow to succeed and verify the published assets before announcing completion. The workflow generates GitHub Release notes but does not update the repository changelog.
