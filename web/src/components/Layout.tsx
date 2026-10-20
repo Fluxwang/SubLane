@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
 import { canAccess } from '@/lib/access'
 import { selectedWorkspace } from '@/lib/workspace'
+import { cn } from '@/lib/cn'
 import { LanguageSelect, ThemeSelect } from './Preferences'
 import { Logo } from './Logo'
 import { Session } from './Session'
@@ -241,9 +242,23 @@ function Navigation() {
 export function Layout({ children }: { children?: ReactNode }) {
   const { t } = useTranslation()
   const { data } = useQuery(authOptions())
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  const tablePage =
+    !children &&
+    [
+      '/requests',
+      '/admin/requests',
+      '/admin/audit',
+      '/members',
+      '/keys',
+      '/pricing',
+    ].includes(pathname)
   const user = data?.user
   const workspace = selectedWorkspace()
   if (!user) return null
+  // Scope changes must also clear route state, query placeholders and open dialogs.
   return (
     <TourProvider
       key={`${user.id}:${user.role}:${workspace}`}
@@ -259,8 +274,10 @@ export function Layout({ children }: { children?: ReactNode }) {
           {t('skipContent')}
         </a>
         <Navigation />
-        <SidebarInset className="min-w-0 bg-background">
-          <header className="flex min-h-16 items-center justify-between gap-3 px-4 md:px-6">
+        <SidebarInset
+          className={cn('min-w-0 bg-background', tablePage && 'h-dvh')}
+        >
+          <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 px-4 md:px-6">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="size-7 text-muted-foreground [@media(pointer:coarse)]:size-11" />
             </div>
@@ -287,7 +304,13 @@ export function Layout({ children }: { children?: ReactNode }) {
           <DemoNotice />
           <main
             id="main-content"
-            className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6"
+            className={cn(
+              'mx-auto w-full px-5 py-6 md:px-6',
+              // Tables need a bounded parent to keep scrollbars and pagination in the viewport.
+              tablePage
+                ? 'flex min-h-0 flex-1 flex-col overflow-y-auto'
+                : 'max-w-6xl',
+            )}
           >
             {children ?? <Outlet />}
           </main>

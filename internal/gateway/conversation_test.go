@@ -88,3 +88,31 @@ func TestConversationReconstructsIncrementalInputAndCompaction(t *testing.T) {
 		t.Fatal("stale transcript merged into compact replay")
 	}
 }
+
+func TestConversationModelSwitchRequiresFullIndependentInput(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		raw  string
+		want error
+	}{
+		{"full history", `{"type":"response.create","model":"synthetic-other","input":[{"role":"assistant","content":"Synthetic reply"},{"role":"user","content":"Continue"}]}`, nil},
+		{"implicit delta", `{"type":"response.create","model":"synthetic-other","input":"Continue"}`, ErrAffinityUnavailable},
+		{"previous response", `{"type":"response.create","model":"synthetic-other","previous_response_id":"resp_synthetic","input":"Continue"}`, ErrAffinityUnavailable},
+		{"previous with history", `{"type":"response.create","model":"synthetic-other","previous_response_id":"resp_synthetic","input":[{"role":"assistant","content":"Synthetic reply"}]}`, ErrAffinityUnavailable},
+		{"append", `{"type":"response.append","model":"synthetic-other","input":"Continue"}`, ErrAffinityUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			conversation := Conversation{}
+			initial, _, err := conversation.Normalize([]byte(`{"type":"response.create","model":"synthetic-model","input":"Synthetic question"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := conversation.Accept(initial, []byte(`{"response":{"id":"resp_synthetic","output":[{"role":"assistant","content":"Synthetic reply"}]}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := conversation.Normalize([]byte(test.raw)); !errors.Is(err, test.want) {
+				t.Fatalf("model switch: got %v, want %v", err, test.want)
+			}
+		})
+	}
+}

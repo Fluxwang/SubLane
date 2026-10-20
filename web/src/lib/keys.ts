@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { authKey, type AuthState } from './auth'
 import { request } from './request'
+import { cachePage, paginationFields } from './pagination'
 
 const secretSchema = z.string().regex(/^sl_[A-Za-z0-9_-]{43}$/)
 const keySchema = z.object({
@@ -31,11 +32,10 @@ const keyUsageSchema = z.object({
   unpriced_tokens: z.number().int().nonnegative(),
 })
 const pageSchema = z.object({
-  keys: z.array(keySchema.extend({ usage: keyUsageSchema })).max(50),
+  keys: z.array(keySchema.extend({ usage: keyUsageSchema })).max(100),
   key_tracking_since: z.number().int().nonnegative(),
   server_time: z.number().int(),
-  next_cursor: z.number().int().nonnegative(),
-  revoked_count: z.number().int().nonnegative(),
+  ...paginationFields,
 })
 const createdSchema = z.object({
   key: keySchema,
@@ -47,17 +47,24 @@ export type KeyPage = z.infer<typeof pageSchema>
 export function keyOptions(
   client: QueryClient,
   userID: number,
-  cursor: number,
+  page: number,
   includeRevoked: boolean,
+  pageSize = 50,
 ) {
+  const key = (value: number) =>
+    ['keys', userID, value, pageSize, includeRevoked] as const
   return queryOptions({
-    queryKey: ['keys', userID, cursor, includeRevoked],
-    queryFn: ({ signal }) =>
-      request(
-        `/api/keys?cursor=${cursor}${includeRevoked ? '&revoked=include' : ''}`,
+    queryKey: key(page),
+    queryFn: async ({ signal }) => {
+      const data = await request(
+        `/api/keys?page=${page}&limit=${pageSize}&include_revoked=${includeRevoked}`,
         pageSchema,
         { signal },
-      ),
+      )
+      if (client.getQueryData<AuthState>(authKey)?.user?.id === userID)
+        cachePage(client, key, page, data)
+      return data
+    },
     // These personal queries opt into member access and stop immediately if the active identity changes.
     enabled: () =>
       userID > 0 &&

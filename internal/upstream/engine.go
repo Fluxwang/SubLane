@@ -20,12 +20,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/murongg/SubLane/internal/accounts"
-	sdkapi "github.com/router-for-me/CLIProxyAPI/v7/sdk/api"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy"
-	core "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	sdkapi "github.com/router-for-me/CLIProxyAPI/v8/sdk/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
+	core "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	"github.com/sirupsen/logrus"
 )
 
@@ -84,7 +84,7 @@ func (c *Client) startEngine(parent context.Context, claudeVersions ...string) (
 	if len(claudeVersions) != 0 {
 		claudeVersion = claudeVersions[0]
 	}
-	configureClaudeSDK(cfg, claudeVersion)
+	cfg.ClaudeHeaderDefaults.UserAgent = claudeUserAgent(claudeVersion)
 	// Preserve caller tool definitions; do not inject an image tool into every coding request.
 	if err := json.Unmarshal([]byte(`"passthrough"`), &cfg.DisableImageGeneration); err != nil {
 		return fail(err)
@@ -112,8 +112,8 @@ func (c *Client) startEngine(parent context.Context, claudeVersions ...string) (
 	if err != nil {
 		return fail(err)
 	}
-	// v7's startup hook does not synchronize its listener fields. An in-process handler
-	// handshake establishes readiness before cancellation may trigger SDK shutdown.
+	// The SDK's startup hook does not guarantee listener readiness. Complete an
+	// in-process handler handshake before cancellation may trigger SDK shutdown.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	rt := &sdkRuntime{manager: manager, address: address, cancel: cancel, done: make(chan error, 1), dir: dir}
 	go func() { err := svc.Run(ctx); os.RemoveAll(dir); rt.done <- err; close(rt.done) }()
@@ -327,6 +327,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		}
 		result, err := executor.Execute(ctx, auth, req, opts)
 		if err != nil {
+			logSDKFailure(ctx, "execute", err, transport)
 			return sdkFailureResponse(err, transport)
 		}
 		if len(result.Payload) > MaxBody {
@@ -338,6 +339,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 	result, err := executor.ExecuteStream(operation, auth, req, opts)
 	if err != nil {
 		cancel()
+		logSDKFailure(ctx, "execute", err, transport)
 		return sdkFailureResponse(err, transport)
 	}
 	reader, writer := io.Pipe()
@@ -346,6 +348,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		defer cancel()
 		for chunk := range result.Chunks {
 			if chunk.Err != nil {
+				logSDKFailure(ctx, "stream", chunk.Err, transport)
 				writer.CloseWithError(sdkError(chunk.Err))
 				return
 			}
@@ -405,6 +408,8 @@ type engineTransport struct {
 	requestedModel       string
 	rateModel            string
 	lastStatus           int
+	lastRequestID        string
+	failureKind          string
 	responseEpoch        uint64
 }
 
@@ -421,6 +426,10 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	response, err := t.base.RoundTrip(r)
 	if err != nil {
+		t.mu.Lock()
+		t.lastStatus, t.lastRequestID = 0, ""
+		t.failureKind = diagnosticErrorKind(err)
+		t.mu.Unlock()
 		return nil, err
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
@@ -431,6 +440,13 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.responseEpoch++
 	epoch := t.responseEpoch
 	t.lastStatus, t.rateModel = response.StatusCode, ""
+	t.failureKind, t.lastRequestID = "", ""
+	for _, header := range []string{"X-Request-ID", "Request-ID"} {
+		if id := response.Header.Get(header); diagnosticRequestID.MatchString(id) {
+			t.lastRequestID = id
+			break
+		}
+	}
 	if response.StatusCode >= 400 {
 		t.retryAfter = response.Header.Get("Retry-After")
 	}

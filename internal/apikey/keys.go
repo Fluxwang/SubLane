@@ -15,6 +15,7 @@ import (
 	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/groups"
+	"github.com/murongg/SubLane/internal/pagination"
 	"github.com/murongg/SubLane/internal/storage/db"
 	"github.com/murongg/SubLane/internal/vault"
 )
@@ -57,10 +58,15 @@ type CreatedKey struct {
 	Secret string `json:"secret"`
 }
 type Page struct {
-	ServerTime   int64 `json:"server_time"`
-	Keys         []Key `json:"keys"`
-	NextCursor   int64 `json:"next_cursor"`
-	RevokedCount int64 `json:"revoked_count"`
+	pagination.Metadata
+	ServerTime int64 `json:"server_time"`
+	Keys       []Key `json:"keys"`
+	NextCursor int64 `json:"next_cursor"`
+}
+type Filter struct {
+	BeforeID       int64
+	Page, Limit    int64
+	IncludeRevoked bool
 }
 type Principal struct{ KeyID, UserID, GroupID, TenantID int64 }
 type Service struct {
@@ -209,9 +215,10 @@ func (s *Service) create(ctx context.Context, userID, groupID, schemeID int64, n
 	return CreatedKey{Key: key, Secret: secret}, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, beforeID int64, includeRevoked bool) (Page, error) {
+func (s *Service) List(ctx context.Context, userID int64, filter Filter) (Page, error) {
 	page := Page{Keys: []Key{}, ServerTime: s.now().Unix()}
-	if beforeID < 0 {
+	bounds := pagination.Input{Page: filter.Page, Limit: filter.Limit, Cursor: filter.BeforeID}
+	if !bounds.Valid() {
 		return page, ErrInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -220,18 +227,26 @@ func (s *Service) List(ctx context.Context, userID, beforeID int64, includeRevok
 	}
 	defer tx.Rollback()
 	q := s.queries.WithTx(tx)
-	// The count and filtered page must describe the same snapshot during revocation.
-	page.RevokedCount, err = q.CountRevokedKeys(ctx, db.CountRevokedKeysParams{UserID: userID, TenantID: s.tenantID})
+	total, err := q.CountKeys(ctx, db.CountKeysParams{UserID: userID, TenantID: s.tenantID, IncludeRevoked: filter.IncludeRevoked})
 	if err != nil {
 		return page, err
 	}
-	rows, err := q.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: beforeID, IncludeRevoked: includeRevoked})
+	page.Metadata = bounds.Resolve(total)
+	rows, err := q.ListKeys(ctx, db.ListKeysParams{UserID: userID, TenantID: s.tenantID, BeforeID: filter.BeforeID, IncludeRevoked: filter.IncludeRevoked, PageLimit: page.PageSize + 1, PageOffset: page.Offset()})
 	if err != nil {
 		return page, err
+	}
+	// Release the snapshot before allowance lookups use the database connection.
+	if err := tx.Commit(); err != nil {
+		return page, err
+	}
+	if int64(len(rows)) > page.PageSize {
+		rows = rows[:page.PageSize]
+		page.NextCursor = rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
 		key := Key(row)
-		if _, err := allocations.KeyScheme(ctx, q, key.ID, userID, key.GroupID, page.ServerTime); err != nil {
+		if _, err := allocations.KeyScheme(ctx, s.queries, key.ID, userID, key.GroupID, s.now().Unix()); err != nil {
 			if !errors.Is(err, allocations.ErrUnavailable) {
 				return page, err
 			}
@@ -239,11 +254,7 @@ func (s *Service) List(ctx context.Context, userID, beforeID int64, includeRevok
 		}
 		page.Keys = append(page.Keys, key)
 	}
-	if len(page.Keys) > 50 {
-		page.Keys = page.Keys[:50]
-		page.NextCursor = page.Keys[49].ID
-	}
-	return page, tx.Commit()
+	return page, nil
 }
 
 var ErrInactive = errors.New("api_key_inactive")

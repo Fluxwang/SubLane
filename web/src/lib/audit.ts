@@ -1,7 +1,9 @@
-import { queryOptions } from '@tanstack/react-query'
+import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import type { en } from '@/locales/en'
 import { request } from './request'
+import { authKey, type AuthState } from './auth'
+import { cachePage, paginationFields } from './pagination'
 export const auditActions: Record<string, keyof typeof en> = {
   'allocation.save': 'auditAllocationSave',
   'allocation.settle': 'auditAllocationSettle',
@@ -80,25 +82,39 @@ const eventSchema = z.object({
   created_at: z.number().int(),
 })
 export function auditOptions(
-  cursor: number,
+  client: QueryClient,
+  page: number,
   resource: AuditResource,
   outcome: AuditOutcome,
+  pageSize = 50,
 ) {
+  const userID = client.getQueryData<AuthState>(authKey)?.user?.id
+  const enabled = () => {
+    const user = client.getQueryData<AuthState>(authKey)?.user
+    return user?.id === userID && user?.role === 'admin'
+  }
   const params = new URLSearchParams({
-    cursor: String(cursor),
+    page: String(page),
+    limit: String(pageSize),
     resource,
     outcome,
   })
+  const key = (value: number) =>
+    ['audit', userID, value, pageSize, resource, outcome] as const
   return queryOptions({
-    queryKey: ['audit', cursor, resource, outcome],
-    queryFn: ({ signal }) =>
-      request(
+    queryKey: key(page),
+    enabled,
+    queryFn: async ({ signal }) => {
+      const data = await request(
         `/api/audit?${params}`,
         z.object({
-          events: z.array(eventSchema).max(50),
-          next_cursor: z.number().int().nonnegative(),
+          events: z.array(eventSchema).max(100),
+          ...paginationFields,
         }),
         { signal },
-      ),
+      )
+      if (enabled()) cachePage(client, key, page, data)
+      return data
+    },
   })
 }

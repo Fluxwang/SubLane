@@ -3,6 +3,7 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { authKey, type AuthState } from './auth'
 import { request } from './request'
 import { providers } from './accounts'
+import { cachePage, paginationFields } from './pagination'
 
 export function formatRequestCost(value: number | null, language: string) {
   return value === null
@@ -112,27 +113,37 @@ export function requestOptions(
   client: QueryClient,
   userID: number | undefined,
   scope: 'personal' | 'all',
-  cursor: number,
+  page: number,
   filters: RequestFilters,
+  pageSize = 50,
 ) {
-  const query = new URLSearchParams({ cursor: String(cursor) })
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: String(pageSize),
+  })
   for (const [key, value] of Object.entries(filters)) {
     if (scope === 'personal' && (key === 'account_id' || key === 'user_id'))
       continue
     if (value !== undefined && value !== '') query.set(key, String(value))
   }
+  const key = (value: number) =>
+    ['request-history', userID, scope, value, pageSize, filters] as const
   return queryOptions({
-    queryKey: ['request-history', userID, scope, cursor, filters],
+    queryKey: key(page),
     enabled: () => currentScope(client, userID, scope),
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      request(
+    queryFn: async ({ signal }: { signal: AbortSignal }) => {
+      const data = await request(
         `${scope === 'personal' ? '/api/me/requests' : '/api/requests'}?${query}`,
         z.object({
-          requests: z.array(recordSchema).max(50),
-          next_cursor: z.number().int().nonnegative(),
+          requests: z.array(recordSchema).max(100),
+          ...paginationFields,
         }),
         { signal },
-      ),
+      )
+      if (currentScope(client, userID, scope))
+        cachePage(client, key, page, data)
+      return data
+    },
   })
 }
 

@@ -29,6 +29,13 @@ export const memberAuthenticated = {
 
 export const anonymous = { initialized: true, time_zone: 'UTC', user: null }
 
+export function withPage(value: unknown) {
+  if (!value || typeof value !== 'object') return value
+  const data = value as Record<string, unknown>
+  const rows = [data.keys, data.members, data.events].find(Array.isArray)
+  return rows ? { total: rows.length, page: 1, page_size: 50, ...data } : value
+}
+
 export const hourlyActivity = {
   tracking_since: 1900000000,
   observed_until: 1900003600,

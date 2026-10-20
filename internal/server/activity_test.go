@@ -138,7 +138,16 @@ func TestKeyListHTTPShowsLifetimeUsageOnlyForTheOwnersKeys(t *testing.T) {
 	if _, err := f.keys.Revoke(ctx, 1, ownerKey.Key.ID); err != nil {
 		t.Fatal(err)
 	}
+	idle, err := f.keys.CreateInGroup(ctx, 1, 1, "Synthetic idle client")
+	if err != nil {
+		t.Fatal(err)
+	}
 	type page struct {
+		Total            int64 `json:"total"`
+		Page             int64 `json:"page"`
+		PageSize         int64 `json:"page_size"`
+		NextCursor       int64 `json:"next_cursor"`
+		ServerTime       int64 `json:"server_time"`
 		KeyTrackingSince int64 `json:"key_tracking_since"`
 		Keys             []struct {
 			ID    int64             `json:"id"`
@@ -146,11 +155,13 @@ func TestKeyListHTTPShowsLifetimeUsageOnlyForTheOwnersKeys(t *testing.T) {
 		} `json:"keys"`
 	}
 	for _, test := range []struct {
-		username, password, path string
-		requests                 int64
+		username, password, path      string
+		requests, total, page, cursor int64
 	}{
-		{"member-test", "member pass 42", "/api/keys", 1},
-		{"owner-test", "owner pass 42", "/api/keys?revoked=include", 2},
+		{"member-test", "member pass 42", "/api/keys?page=1&limit=1", 1, 1, 1, 0},
+		{"owner-test", "owner pass 42", "/api/keys?page=2&limit=1&include_revoked=true", 2, 2, 2, 0},
+		{"owner-test", "owner pass 42", "/api/keys?page=1&limit=1&include_revoked=false", 0, 1, 1, 0},
+		{"owner-test", "owner pass 42", "/api/keys?page=1&limit=1&include_revoked=true", 0, 2, 1, idle.Key.ID},
 	} {
 		login, err := f.identity.Login(ctx, test.username, test.password)
 		if err != nil {
@@ -160,6 +171,9 @@ func TestKeyListHTTPShowsLifetimeUsageOnlyForTheOwnersKeys(t *testing.T) {
 		var value page
 		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &value) != nil {
 			t.Fatal("key list unavailable", response.Code)
+		}
+		if value.Total != test.total || value.Page != test.page || value.PageSize != 1 || value.NextCursor != test.cursor || value.ServerTime <= 0 {
+			t.Fatalf("lost pagination metadata: %s", response.Body.String())
 		}
 		if value.KeyTrackingSince <= 0 || len(value.Keys) != 1 || value.Keys[0].Usage == nil {
 			t.Fatal("missing key lifetime usage", test.username, response.Body.String())

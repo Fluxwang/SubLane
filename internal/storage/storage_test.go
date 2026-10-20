@@ -86,6 +86,52 @@ func TestOpenAddsInvitationMigrationToExistingSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAddsAffinityModelWithoutMovingLegacyBindings(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-affinity-upgrade.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := previous.ExecContext(ctx, `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "017_affinity_model.sql" {
+			break
+		}
+		if err := apply(ctx, previous, entry.Name()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := previous.ExecContext(ctx, `INSERT INTO users(id,username,password_hash,role,created_at) VALUES(1,'synthetic-owner','synthetic-hash','admin',1);
+		INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(1,'Synthetic workspace',1,1);
+		INSERT INTO account_groups(id,name,enabled,created_at,updated_at) VALUES(1,'Synthetic pool',1,1,1);
+		INSERT INTO account_affinity(user_id,group_id,session_hash,provider,account_id,expires_at) VALUES(1,1,zeroblob(32),'auto','synthetic-original-account',1900000000)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var account, model string
+		var expiry int64
+		err = upgraded.QueryRowContext(ctx, "SELECT account_id,model,expires_at FROM account_affinity").Scan(&account, &model, &expiry)
+		upgraded.Close()
+		if err != nil || account != "synthetic-original-account" || model != "" || expiry != 1900000000 {
+			t.Fatalf("legacy binding changed: account=%q model=%q expiry=%d err=%v", account, model, expiry, err)
+		}
+	}
+}
+
 func TestOpenUpdatesAccountConcurrencyDefaultAndPreservesSettings(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-account-limits.db")
@@ -443,5 +489,84 @@ func TestOpenExplainsUnsupportedPrereleaseDatabase(t *testing.T) {
 	var count int
 	if err := check.QueryRow(`SELECT count(*) FROM schema_migrations WHERE name='001_schema.sql'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("legacy database was modified during rejection: count=%d err=%v", count, err)
+	}
+}
+func TestOpenUpgradesForkKeyUsageWithoutReapplyingMigrations(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-fork-upgrade.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = previous.Close() })
+	if _, err := previous.ExecContext(ctx, `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fork and upstream migrations interleave by name, not by their numeric prefix.
+	// Pre-upgrade backups lack the affinity migration and are rejected by snapshot validation.
+	for _, entry := range entries {
+		if entry.Name() == "017_affinity_model.sql" {
+			continue
+		}
+		if err := apply(ctx, previous, entry.Name()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := previous.ExecContext(ctx, `
+ INSERT INTO users(id,username,password_hash,role,created_at) VALUES(1,'synthetic-owner','synthetic-hash','admin',1);
+ INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(1,'Synthetic workspace',1,1);
+ INSERT INTO account_groups(id,name,enabled,created_at,updated_at) VALUES(1,'Synthetic pool',1,1,1);
+ INSERT INTO account_affinity(user_id,group_id,session_hash,provider,account_id,expires_at) VALUES(1,1,zeroblob(32),'auto','synthetic-original-account',1900000000);
+ INSERT INTO usage_daily_keys(day,key_id,requests,input_tokens,output_tokens,cached_tokens,input_reported,output_reported,cached_reported) VALUES(1900000000,7,3,700,300,100,3,3,2);
+ INSERT INTO usage_lifetime_keys(key_id,model,requests,input_tokens,output_tokens,cached_tokens,unsplit_input_tokens,input_reported,output_reported) VALUES(7,'codex/synthetic',5,900,400,200,100,5,4);
+ UPDATE settings SET value='1800000000' WHERE key='usage.keys.started_at';
+ UPDATE schema_migrations SET applied_at='synthetic-original-time';`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateSnapshot(ctx, previous); err == nil {
+		t.Fatal("pre-upgrade fork backup unexpectedly accepted")
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer upgraded.Close()
+			var account, model string
+			var expiry int64
+			if err := upgraded.QueryRowContext(ctx, `SELECT account_id,model,expires_at FROM account_affinity`).Scan(&account, &model, &expiry); err != nil || account != "synthetic-original-account" || model != "" || expiry != 1900000000 {
+				t.Fatalf("legacy affinity changed: %q %q %d %v", account, model, expiry, err)
+			}
+			var daily, lifetime string
+			if err := upgraded.QueryRowContext(ctx, `SELECT printf('%d,%d,%d,%d,%d,%d,%d,%d,%d',day,key_id,requests,input_tokens,output_tokens,cached_tokens,input_reported,output_reported,cached_reported) FROM usage_daily_keys`).Scan(&daily); err != nil || daily != "1900000000,7,3,700,300,100,3,3,2" {
+				t.Fatalf("daily usage changed: %q %v", daily, err)
+			}
+			if err := upgraded.QueryRowContext(ctx, `SELECT printf('%d,%s,%d,%d,%d,%d,%d,%d,%d',key_id,model,requests,input_tokens,output_tokens,cached_tokens,unsplit_input_tokens,input_reported,output_reported) FROM usage_lifetime_keys`).Scan(&lifetime); err != nil || lifetime != "7,codex/synthetic,5,900,400,200,100,5,4" {
+				t.Fatalf("lifetime usage changed: %q %v", lifetime, err)
+			}
+			var since string
+			if err := upgraded.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='usage.keys.started_at'`).Scan(&since); err != nil || since != "1800000000" {
+				t.Fatalf("tracking start changed: %q %v", since, err)
+			}
+			var original, added int
+			if err := upgraded.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE applied_at='synthetic-original-time'`).Scan(&original); err != nil || original != len(entries)-1 {
+				t.Fatalf("old migration history changed: %d %v", original, err)
+			}
+			if err := upgraded.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE name='017_affinity_model.sql' AND applied_at!='synthetic-original-time'`).Scan(&added); err != nil || added != 1 {
+				t.Fatalf("affinity migration missing: %d %v", added, err)
+			}
+			version, err := ValidateSnapshot(ctx, upgraded)
+			if err != nil || version != len(entries) {
+				t.Fatalf("upgraded snapshot rejected: %d %v", version, err)
+			}
+		}()
 	}
 }

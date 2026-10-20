@@ -1119,12 +1119,10 @@ export const en = {
   keysLoadFailed: 'Could not load your API keys. Please try again.',
   noKeys: 'No API keys yet',
   noKeysDescription: 'Create a personal key for your client or application.',
-  showRevokedKeys: 'Show revoked ({{count}})',
-  keyRevokedNotice: "Key revoked. Use 'Show revoked' to view it.",
-  showRevoked: 'Show revoked',
-  noUsableKeys: 'No usable keys ({{count}} revoked)',
-  noUsableKeysDescription:
-    'Show your revoked keys to view them, or create a new key.',
+  noUnrevokedKeys: 'No unrevoked API keys',
+  noUnrevokedKeysDescription:
+    'Create a personal key, or turn on Show revoked to view past keys.',
+  showRevokedKeys: 'Show revoked',
   keyCost: 'Cost',
   keyCostNote: 'Costs are estimated with current prices since {{date}}.',
   keyCostUnpriced:
@@ -1140,6 +1138,7 @@ export const en = {
   revokeKeyDescription:
     'Revoke “{{name}}”? Clients using this key will lose access. This cannot be undone.',
   keyRevokeFailed: 'Could not revoke this key. Please try again.',
+  keyRevokedNotice: '{{name}} was revoked.',
   manageKeys: 'Manage API keys',
   membersDescription:
     'Disabling a member immediately blocks their keys in this workspace only.',
@@ -1202,6 +1201,13 @@ export const en = {
   enableMemberNamed: 'Enable {{username}}',
   previousPage: 'Previous',
   nextPage: 'Next',
+  pagination: 'Pagination',
+  paginationRange: 'Showing {{start}}–{{end}} of {{total}}',
+  paginationSize: 'Rows per page',
+  paginationPage: 'Page {{page}} of {{pages}}',
+  paginationNumber: 'Page {{page}}',
+  paginationJump: 'Go to page',
+  paginationGo: 'Go',
   cancel: 'Cancel',
   role: 'Role',
   active: 'Active',

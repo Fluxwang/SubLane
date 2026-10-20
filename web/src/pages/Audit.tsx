@@ -1,5 +1,12 @@
+import { Pagination } from '@/components/Pagination'
+import { TableViewport } from '@/components/TableViewport'
+import { useTablePagination } from '@/lib/pagination'
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { ChevronDown, LoaderCircle, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
@@ -29,19 +36,23 @@ export function Audit() {
 function AuditLog() {
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
-  const [cursors, setCursors] = useState([0])
+  const client = useQueryClient()
+  const { page, pageSize, viewport, changePage, changePageSize, syncPage } =
+    useTablePagination()
   const [resource, setResource] = useState<AuditResource>('')
   const [outcome, setOutcome] = useState<AuditOutcome>('')
-  const query = useQuery(
-    auditOptions(cursors[cursors.length - 1], resource, outcome),
-  )
+  const query = useQuery({
+    ...auditOptions(client, page, resource, outcome, pageSize),
+    placeholderData: keepPreviousData,
+  })
+  syncPage(query.data?.page, query.isPlaceholderData)
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     timeZone,
     dateStyle: 'short',
     timeStyle: 'medium',
   })
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="page-title">{t('auditLog')}</h1>
@@ -71,7 +82,7 @@ function AuditLog() {
               value={resource}
               onValueChange={(value) => {
                 setResource(value as AuditResource)
-                setCursors([0])
+                changePage(1)
               }}
             >
               <DropdownMenuRadioItem value="">
@@ -105,7 +116,7 @@ function AuditLog() {
               value={outcome}
               onValueChange={(value) => {
                 setOutcome(value as AuditOutcome)
-                setCursors([0])
+                changePage(1)
               }}
             >
               {(['', 'success', 'failure'] as const).map((value) => (
@@ -149,7 +160,7 @@ function AuditLog() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <TableViewport ref={viewport} aria-busy={query.isFetching}>
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-muted-foreground">
               <tr>
@@ -228,30 +239,20 @@ function AuditLog() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
       <p className="text-xs leading-5 text-muted-foreground">
         {t('auditRetention')}
       </p>
-      {query.data && (cursors.length > 1 || query.data.next_cursor !== 0) && (
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            disabled={cursors.length === 1 || query.isFetching}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
-          >
-            {t('previousPage')}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!query.data.next_cursor || query.isFetching}
-            onClick={() =>
-              setCursors((value) => [...value, query.data.next_cursor])
-            }
-          >
-            {t('nextPage')}
-          </Button>
-        </div>
+      {query.data && (
+        <Pagination
+          page={query.data.page}
+          pageSize={query.data.page_size}
+          total={query.data.total}
+          disabled={query.isFetching}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
       )}
     </div>
   )

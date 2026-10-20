@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/murongg/SubLane/internal/tenants"
@@ -70,20 +69,16 @@ func (h *authHTTP) memberRole(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *authHTTP) listMembers(w http.ResponseWriter, r *http.Request) {
-	var cursor int64
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value < 0 {
-			writeJSON(w, 400, map[string]string{"error": "invalid_input"})
-			return
-		}
-		cursor = value
+	paging, valid := parsePagination(r.URL.Query())
+	if !valid {
+		writeJSON(w, 400, map[string]string{"error": "invalid_input"})
+		return
 	}
 	if h.tenants == nil {
 		writeJSON(w, 503, map[string]string{"error": "unavailable"})
 		return
 	}
-	page, err := h.tenants.ListMembers(r.Context(), h.tenantID, cursor)
+	page, err := h.tenants.ListMembersPage(r.Context(), h.tenantID, paging)
 	if err != nil {
 		authError(w, err)
 		return

@@ -81,7 +81,7 @@ func TestDiagnosticFiltersComposeBeforePaginationAndPreserveOwner(t *testing.T) 
 	}
 	filter := RequestFilter{Model: "synthetic-a", KeyID: 2, From: now - 90, Until: now - 10, MemberID: 2, RequestID: "synthetic-id"}
 	page, err := s.Requests(ctx, filter)
-	if err != nil || len(page.Requests) != 7 {
+	if err != nil || len(page.Requests) != 7 || page.Total != 7 {
 		t.Fatal("composed filters incorrect", len(page.Requests), err)
 	}
 	for _, r := range page.Requests {
@@ -92,7 +92,7 @@ func TestDiagnosticFiltersComposeBeforePaginationAndPreserveOwner(t *testing.T) 
 	filter.MemberID = 1
 	filter.AccountID = "another-account"
 	personal, err := s.UserRequests(ctx, 2, filter)
-	if err != nil || len(personal.Requests) != len(page.Requests) {
+	if err != nil || len(personal.Requests) != len(page.Requests) || personal.Total != page.Total {
 		t.Fatal("personal filters changed SQL ownership", err, len(personal.Requests))
 	}
 	for _, bad := range []RequestFilter{{From: now, Until: now - 1}, {KeyID: -1}, {MemberID: -1}, {Model: strings.Repeat("x", 161)}, {RequestID: "unsafe\nidentifier"}} {

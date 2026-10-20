@@ -79,6 +79,15 @@ func (c *Conversation) Normalize(raw []byte) ([]byte, bool, error) {
 	if json.Unmarshal(input["model"], &model) != nil || model == "" {
 		return nil, false, upstream.ErrInput
 	}
+	if c.request != nil && (appendHistory || previous != "" || kind == "response.append") {
+		var priorModel string
+		_ = json.Unmarshal(c.request["model"], &priorModel)
+		// Normalization removes continuation IDs and fills history. Do not let that
+		// turn an incremental model change into permission to rebind an account.
+		if upstream.CatalogModelID(model) != upstream.CatalogModelID(priorModel) {
+			return nil, false, ErrAffinityUnavailable
+		}
+	}
 	prewarm := false
 	if flag, ok := input["generate"]; ok {
 		var generate bool

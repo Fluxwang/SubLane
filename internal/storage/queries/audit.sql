@@ -13,4 +13,10 @@ SELECT * FROM audit_events
 WHERE tenant_id=sqlc.arg(tenant_id) AND (id<sqlc.arg(before_id) OR sqlc.arg(before_id)=0)
 AND (resource=sqlc.arg(resource) OR sqlc.arg(resource)='')
 AND (outcome=sqlc.arg(outcome) OR sqlc.arg(outcome)='')
-ORDER BY id DESC LIMIT 51;
+ORDER BY id DESC LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountAuditEvents :one
+SELECT COUNT(*) FROM audit_events
+WHERE tenant_id=sqlc.arg(tenant_id)
+AND (resource=sqlc.arg(resource) OR sqlc.arg(resource)='')
+AND (outcome=sqlc.arg(outcome) OR sqlc.arg(outcome)='');

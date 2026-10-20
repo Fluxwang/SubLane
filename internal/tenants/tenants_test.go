@@ -135,7 +135,7 @@ func TestMemberListIncludesOwnerWithoutAllowingOwnerChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, err := service.ListMembers(ctx, workspace.ID, 0)
-	if err != nil || len(page.Members) != 2 || page.Members[0].ID != 3 || page.Members[1].ID != 2 || page.Members[1].Role != RoleOwner {
+	if err != nil || len(page.Members) != 2 || page.Total != 2 || page.Members[0].ID != 3 || page.Members[1].ID != 2 || page.Members[1].Role != RoleOwner {
 		t.Fatalf("workspace roster omitted owner: %+v, %v", page, err)
 	}
 	if _, err := service.SetMemberEnabled(ctx, 2, workspace.ID, 2, false); err != ErrNotFound {
