@@ -21,8 +21,19 @@ const keySchema = z.object({
   enabled: z.boolean(),
   expires_at: z.number().int().nullable(),
 })
+// Lifetime usage is listed with each owned key; mutation responses carry metadata only.
+const keyUsageSchema = z.object({
+  requests: z.number().int().nonnegative(),
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+  input_reported: z.number().int().nonnegative(),
+  output_reported: z.number().int().nonnegative(),
+  estimated_micro_usd: z.number().int().nonnegative(),
+  unpriced_tokens: z.number().int().nonnegative(),
+})
 const pageSchema = z.object({
-  keys: z.array(keySchema).max(100),
+  keys: z.array(keySchema.extend({ usage: keyUsageSchema })).max(100),
+  key_tracking_since: z.number().int().nonnegative(),
   server_time: z.number().int(),
   ...paginationFields,
 })
@@ -31,6 +42,7 @@ const createdSchema = z.object({
   secret: secretSchema,
 })
 export type APIKey = z.infer<typeof keySchema>
+export type KeyPage = z.infer<typeof pageSchema>
 
 export function keyOptions(
   client: QueryClient,
