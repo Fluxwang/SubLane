@@ -51,6 +51,15 @@ it.each([
           created_at: 1900000000,
           last_used_at: null,
           revoked_at: null,
+          usage: {
+            requests: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            input_reported: 0,
+            output_reported: 0,
+            estimated_micro_usd: 0,
+            unpriced_tokens: 0,
+          },
         }
       return {
         model: `synthetic-model-${i}`,
@@ -80,6 +89,9 @@ it.each([
                   page_size: size,
                   next_cursor: 0,
                   server_time: 1900000000,
+                  ...(field === 'keys'
+                    ? { key_tracking_since: 1900000000 }
+                    : {}),
                 }
         }
         return Promise.resolve(new Response(JSON.stringify(data)))
