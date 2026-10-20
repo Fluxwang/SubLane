@@ -1,3 +1,6 @@
+import { Pagination } from '@/components/Pagination'
+import { TableViewport } from '@/components/TableViewport'
+import { useTablePagination } from '@/lib/pagination'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, RefreshCw, Search } from 'lucide-react'
@@ -6,7 +9,6 @@ import { pricingOptions } from '@/lib/pricing'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
-const pageSize = 50
 const sourceLabels = {
   remote: 'pricingSourceRemote',
   cache: 'pricingSourceCache',
@@ -19,16 +21,24 @@ export function Pricing() {
   const client = useQueryClient()
   const query = useQuery(pricingOptions(client))
   const [search, setSearch] = useState('')
-  const [pageIndex, setPageIndex] = useState(0)
+  const {
+    page: requestedPage,
+    pageSize,
+    viewport,
+    changePage,
+    changePageSize,
+    syncPage,
+  } = useTablePagination()
   const filter = search.trim().toLowerCase()
   const prices = (query.data?.prices ?? []).filter((price) =>
     price.model.toLowerCase().includes(filter),
   )
   const page = Math.min(
-    pageIndex,
-    Math.max(0, Math.ceil(prices.length / pageSize) - 1),
+    requestedPage,
+    Math.max(1, Math.ceil(prices.length / pageSize)),
   )
-  const offset = page * pageSize
+  syncPage(page)
+  const offset = (page - 1) * pageSize
   const dollars = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en', {
     style: 'currency',
     currency: 'USD',
@@ -40,7 +50,7 @@ export function Pricing() {
   const format = (value: number) => dollars.format(value / 1_000_000)
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <h1 className="page-title">{t('modelPrices')}</h1>
         <Button
@@ -74,7 +84,7 @@ export function Pricing() {
             aria-label={t('pricingSearch')}
             onChange={(event) => {
               setSearch(event.target.value)
-              setPageIndex(0)
+              changePage(1)
             }}
           />
         </div>
@@ -110,7 +120,7 @@ export function Pricing() {
           </p>
         ) : (
           <>
-            <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <TableViewport ref={viewport} aria-busy={query.isFetching}>
               <table
                 role="table"
                 aria-label={t('modelPrices')}
@@ -209,35 +219,20 @@ export function Pricing() {
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p role="status" className="text-sm text-muted-foreground">
-                {t('pricingRange', {
-                  start: offset + 1,
-                  end: Math.min(offset + pageSize, prices.length),
-                  count: prices.length,
-                })}
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page === 0}
-                  onClick={() => setPageIndex(page - 1)}
-                >
-                  {t('previousPage')}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={offset + pageSize >= prices.length}
-                  onClick={() => setPageIndex(page + 1)}
-                >
-                  {t('nextPage')}
-                </Button>
-              </div>
-            </div>
+            </TableViewport>
           </>
         )
       ) : null}
+      {query.data && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={prices.length}
+          disabled={query.isFetching}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
+      )}
     </div>
   )
 }

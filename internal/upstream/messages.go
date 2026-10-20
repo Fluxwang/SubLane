@@ -7,8 +7,8 @@ import (
 	"net/http"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 )
 
 func ValidateMessages(raw []byte, maxRequestBody ...int64) error {
@@ -25,7 +25,7 @@ func ValidateMessages(raw []byte, maxRequestBody ...int64) error {
 		return ErrInput
 	}
 	for _, message := range request.Messages {
-		if message.Role != "user" && message.Role != "assistant" {
+		if message.Role != "user" && message.Role != "assistant" && message.Role != "system" {
 			return ErrInput
 		}
 		var text string
@@ -33,8 +33,11 @@ func ValidateMessages(raw []byte, maxRequestBody ...int64) error {
 		if len(message.Content) == 0 || string(message.Content) == "null" {
 			return ErrInput
 		}
-		if json.Unmarshal(message.Content, &text) != nil && (json.Unmarshal(message.Content, &blocks) != nil || len(blocks) == 0) {
-			return ErrInput
+		if json.Unmarshal(message.Content, &text) != nil {
+			// Claude Code sends empty system turns to update per-message effort without changing the cached prompt.
+			if json.Unmarshal(message.Content, &blocks) != nil || len(blocks) == 0 && message.Role != "system" {
+				return ErrInput
+			}
 		}
 		for _, block := range blocks {
 			var kind string

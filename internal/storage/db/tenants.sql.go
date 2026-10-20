@@ -27,6 +27,18 @@ func (q *Queries) CanManageTenant(ctx context.Context, arg CanManageTenantParams
 	return exists, err
 }
 
+const countTenantMembers = `-- name: CountTenantMembers :one
+SELECT COUNT(*) FROM memberships m JOIN users u ON u.id=m.user_id
+WHERE m.tenant_id=?1 AND m.role IN ('owner','member','admin')
+`
+
+func (q *Queries) CountTenantMembers(ctx context.Context, tenantID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTenantMembers, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getTenantMember = `-- name: GetTenantMember :one
 SELECT u.id,u.username,m.role,m.enabled,u.enabled AS user_enabled,m.created_at
 FROM memberships m JOIN users u ON u.id=m.user_id
@@ -66,12 +78,14 @@ SELECT u.id,u.username,m.role,m.enabled,u.enabled AS user_enabled,m.created_at
 FROM memberships m JOIN users u ON u.id=m.user_id
 WHERE m.tenant_id=?1 AND m.role IN ('owner','member','admin')
 AND (u.id<?2 OR ?2=0)
-ORDER BY u.id DESC LIMIT 51
+ORDER BY u.id DESC LIMIT ?4 OFFSET ?3
 `
 
 type ListTenantMembersParams struct {
-	TenantID int64
-	BeforeID int64
+	TenantID   int64
+	BeforeID   int64
+	PageOffset int64
+	PageLimit  int64
 }
 
 type ListTenantMembersRow struct {
@@ -84,7 +98,12 @@ type ListTenantMembersRow struct {
 }
 
 func (q *Queries) ListTenantMembers(ctx context.Context, arg ListTenantMembersParams) ([]ListTenantMembersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listTenantMembers, arg.TenantID, arg.BeforeID)
+	rows, err := q.db.QueryContext(ctx, listTenantMembers,
+		arg.TenantID,
+		arg.BeforeID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

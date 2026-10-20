@@ -51,47 +51,27 @@ func (h *keyHTTP) requireAvailable(next http.Handler) http.Handler {
 }
 
 func (h *keyHTTP) list(w http.ResponseWriter, r *http.Request) {
-	var cursor int64
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value < 0 {
+	var filter apikey.Filter
+	paging, valid := parsePagination(r.URL.Query())
+	if !valid {
+		keyError(w, apikey.ErrInput)
+		return
+	}
+	filter.BeforeID, filter.Page, filter.Limit = paging.Cursor, paging.Page, paging.Limit
+	if raw := r.URL.Query().Get("include_revoked"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
 			keyError(w, apikey.ErrInput)
 			return
 		}
-		cursor = value
+		filter.IncludeRevoked = value
 	}
-	page, err := h.service.List(r.Context(), sessionUser(r).ID, cursor, r.URL.Query().Get("revoked") == "include")
+	page, err := h.service.List(r.Context(), sessionUser(r).ID, filter)
 	if err != nil {
 		keyError(w, err)
 		return
 	}
-	if h.gateway == nil {
-		writeJSON(w, 200, page)
-		return
-	}
-	// Usage accounting stays in the gateway; the key lifecycle service knows nothing about prices.
-	ids := make([]int64, 0, len(page.Keys))
-	for _, key := range page.Keys {
-		ids = append(ids, key.ID)
-	}
-	usage, err := h.gateway.KeyUsage(r.Context(), sessionUser(r).ID, ids)
-	if err != nil {
-		keyError(w, err)
-		return
-	}
-	type listedKey struct {
-		apikey.Key
-		Usage gateway.KeyUsage `json:"usage"`
-	}
-	keys := make([]listedKey, 0, len(page.Keys))
-	for _, key := range page.Keys {
-		keys = append(keys, listedKey{Key: key, Usage: usage.Keys[key.ID]})
-	}
-	writeJSON(w, 200, struct {
-		apikey.Page
-		Keys             []listedKey `json:"keys"`
-		KeyTrackingSince int64       `json:"key_tracking_since"`
-	}{Page: page, Keys: keys, KeyTrackingSince: usage.TrackingSince})
+	writeJSON(w, 200, page)
 }
 
 func (h *keyHTTP) create(w http.ResponseWriter, r *http.Request) {

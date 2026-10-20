@@ -16,9 +16,9 @@ import (
 
 // Called under s.mu by Open, keeping policy, selection and account reservation atomic.
 func (s *Service) selectAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind) (string, [32]byte, error) {
-	return s.selectAllocationAccount(ctx, userID, groupID, session, provider, model, kind, 0)
+	return s.selectAllocationAccount(ctx, userID, groupID, session, provider, model, kind, 0, pinnedAffinity)
 }
-func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind, scheme int64) (string, [32]byte, error) {
+func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind, scheme int64, affinity affinityMode) (string, [32]byte, error) {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", userID, session)))
 	// Preserve upstream session/cache IDs for existing conversations in the former default pool, even after it is renamed.
 	if groupID != groups.LegacyID {
@@ -70,6 +70,8 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 	}
 	now := s.now().Unix()
 	expires := now + 24*3600
+	bindingModel := upstream.CatalogModelID(model)
+	var replacement *db.ListSessionAffinitiesRow
 	if session != "" {
 		bindings, err := q.ListSessionAffinities(ctx, db.ListSessionAffinitiesParams{GroupID: groupID, UserID: userID, SessionHash: digest[:], Now: now})
 		if err != nil {
@@ -91,6 +93,11 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 		}
 		if existing != nil {
 			id := existing.AccountID
+			// After a portable model switch, old opaque state must not be sent
+			// to the new account even if it also supports the previous model.
+			if affinity == continuationAffinity && existing.Model != "" && bindingModel != existing.Model {
+				return id, digest, ErrAffinityUnavailable
+			}
 			if !allowed[id] {
 				return id, digest, ErrAffinityUnavailable
 			}
@@ -113,9 +120,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			if kind == Compact && bound.Provider != "codex" {
 				return id, digest, upstream.ErrInput
 			}
-			if model != "" && !policy.AllowsResource(bound.Provider, model) {
-				return id, digest, ErrModelNotAllowed
-			}
+			reselect := false
 			if model != "" && bound.Enabled && bound.Status != "reauth_required" {
 				known, supported, err := s.catalogSupport(ctx, q, id, model, bound.Provider)
 				if err != nil {
@@ -125,35 +130,52 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 					return id, digest, ErrCatalogUnavailable
 				}
 				if !supported {
-					return id, digest, ErrAffinityUnavailable
+					// A missing capability is not a failover signal. Only an explicit
+					// model change with portable history may replace a known binding.
+					if affinity != portableAffinity || existing.Model == "" || existing.Model == bindingModel {
+						return id, digest, ErrAffinityUnavailable
+					}
+					reselect = true
 				}
 			}
-			if err := s.accountAdmission(*bound); err != nil {
-				return id, digest, err
-			}
-			if err := s.modelAdmission(ctx, q, id, model); err != nil {
-				return id, digest, err
-			}
-			if err := s.quotaAdmission(ctx, q, *bound, model); err != nil {
-				return id, digest, err
-			}
-			if scheme != 0 {
-				if _, err := allocations.Check(ctx, q, scheme, userID, groupID, id, model, now, s.location()); err != nil {
+			if reselect {
+				if existing.Provider == scope {
+					replacement = existing
+				}
+			} else {
+				if model != "" && !policy.AllowsResource(bound.Provider, model) {
+					return id, digest, ErrModelNotAllowed
+				}
+				if err := s.accountAdmission(*bound); err != nil {
 					return id, digest, err
 				}
-			}
-			if existing.Provider != scope {
-				if err := rememberAffinity(ctx, q, userID, groupID, digest, scope, id, now, expires); err != nil {
+				if err := s.modelAdmission(ctx, q, id, model); err != nil {
+					return id, digest, err
+				}
+				if err := s.quotaAdmission(ctx, q, *bound, model); err != nil {
+					return id, digest, err
+				}
+				if scheme != 0 {
+					if _, err := allocations.Check(ctx, q, scheme, userID, groupID, id, model, now, s.location()); err != nil {
+						return id, digest, err
+					}
+				}
+				if bindingModel == "" {
+					bindingModel = existing.Model
+				}
+				if existing.Provider != scope {
+					if err := rememberAffinity(ctx, q, userID, groupID, digest, scope, id, bindingModel, now, expires); err != nil {
+						return "", digest, err
+					}
+				}
+				if err := q.TouchAccountAffinity(ctx, db.TouchAccountAffinityParams{GroupID: groupID, Provider: existing.Provider, UserID: userID, SessionHash: digest[:], Model: bindingModel, ExpiresAt: expires, Threshold: expires - 1800}); err != nil {
 					return "", digest, err
 				}
+				if err := tx.Commit(); err != nil {
+					return "", digest, err
+				}
+				return id, digest, nil
 			}
-			if err := q.TouchAccountAffinity(ctx, db.TouchAccountAffinityParams{GroupID: groupID, Provider: existing.Provider, UserID: userID, SessionHash: digest[:], ExpiresAt: expires, Threshold: expires - 1800}); err != nil {
-				return "", digest, err
-			}
-			if err := tx.Commit(); err != nil {
-				return "", digest, err
-			}
-			return id, digest, nil
 		}
 	}
 	candidates := make([]string, 0, len(available))
@@ -266,7 +288,12 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 	id := candidates[s.next[cursor]%len(candidates)]
 	s.next[cursor] = (s.next[cursor] + 1) % len(candidates)
 	if session != "" {
-		if err := rememberAffinity(ctx, q, userID, groupID, digest, scope, id, now, expires); err != nil {
+		if replacement != nil {
+			err = q.ReplaceAccountAffinity(ctx, db.ReplaceAccountAffinityParams{UserID: userID, GroupID: groupID, SessionHash: digest[:], Provider: scope, AccountID: id, Model: bindingModel, ExpiresAt: expires})
+		} else {
+			err = rememberAffinity(ctx, q, userID, groupID, digest, scope, id, bindingModel, now, expires)
+		}
+		if err != nil {
 			return "", digest, err
 		}
 	}
@@ -287,7 +314,7 @@ func preferredProvider(kind Kind) string {
 	}
 }
 
-func rememberAffinity(ctx context.Context, q *db.Queries, userID, groupID int64, digest [32]byte, scope, id string, now, expires int64) error {
+func rememberAffinity(ctx context.Context, q *db.Queries, userID, groupID int64, digest [32]byte, scope, id, model string, now, expires int64) error {
 	if err := q.PruneAccountAffinity(ctx, now); err != nil {
 		return err
 	}
@@ -298,5 +325,5 @@ func rememberAffinity(ctx context.Context, q *db.Queries, userID, groupID int64,
 	if count >= 4096 {
 		return ErrAffinityLimit
 	}
-	return q.CreateAccountAffinity(ctx, db.CreateAccountAffinityParams{GroupID: groupID, Provider: scope, UserID: userID, SessionHash: digest[:], AccountID: id, ExpiresAt: expires})
+	return q.CreateAccountAffinity(ctx, db.CreateAccountAffinityParams{GroupID: groupID, Provider: scope, UserID: userID, SessionHash: digest[:], AccountID: id, Model: model, ExpiresAt: expires})
 }

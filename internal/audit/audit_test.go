@@ -46,7 +46,7 @@ func TestManagementAuditIsScopedToWorkspace(t *testing.T) {
 	}
 	for _, tenantID := range []int64{1, 2} {
 		page, err := NewForTenant(connection, tenantID).List(context.Background(), Filter{})
-		if err != nil || len(page.Events) != 1 || page.Events[0].ResourceID != ID(tenantID) {
+		if err != nil || len(page.Events) != 1 || page.Total != 1 || page.Events[0].ResourceID != ID(tenantID) {
 			t.Fatalf("management audit leaked across workspaces: %+v, %v", page, err)
 		}
 	}

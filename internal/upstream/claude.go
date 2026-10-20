@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	core "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	core "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 )
 
 const DefaultClaudeVersion = "2.1.287"
@@ -23,17 +22,6 @@ func (c *Client) currentClaudeVersion() string {
 }
 
 func claudeUserAgent(version string) string { return "claude-cli/" + version + " (external, cli)" }
-
-func configureClaudeSDK(cfg *sdkconfig.Config, version string) {
-	cfg.ClaudeHeaderDefaults.UserAgent = claudeUserAgent(version)
-	models := []sdkconfig.PayloadModelRule{
-		{Name: "claude-opus-5-5", Protocol: "claude"},
-		{Name: "claude-sonnet-5-5", Protocol: "claude", NotMatch: []map[string]any{{"thinking.type": "between_tools"}}},
-	}
-	// The pinned SDK lacks these adaptive-only models. Apply compatibility before its final CCH signing.
-	cfg.Payload.Override = []sdkconfig.PayloadRule{{Models: models, Params: map[string]any{"thinking.type": "adaptive"}}}
-	cfg.Payload.Filter = []sdkconfig.PayloadFilterRule{{Models: models, Params: []string{"thinking.budget_tokens"}}}
-}
 
 func (c *Client) versionedClaudeExecutor(ctx context.Context, version string) (core.ProviderExecutor, error) {
 	base, err := c.executor("claude")
@@ -80,6 +68,8 @@ func adaptiveClaudeModel(model string) bool {
 	}
 }
 
+// Keep strict client validation here; SDK normalization can otherwise silently
+// replace unsupported controls. The executor owns final model shaping and signing.
 func (c *Client) prepareClaude(raw []byte, opts exec.Options) ([]byte, exec.Options, error) {
 	var source map[string]json.RawMessage
 	if json.Unmarshal(raw, &source) != nil {

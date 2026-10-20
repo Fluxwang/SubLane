@@ -1,3 +1,4 @@
+import { withPage } from '@/test/fixtures'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryHistory } from '@tanstack/react-router'
@@ -5,7 +6,8 @@ import { expect, it, vi } from 'vitest'
 import { App } from '@/App'
 import { createAppRouter } from '@/router'
 import { authenticated, memberAuthenticated } from '@/test/fixtures'
-const response = (value: unknown) => new Response(JSON.stringify(value))
+const response = (value: unknown) =>
+  new Response(JSON.stringify(withPage(value)))
 it('filters administrator audit records and follows bounded pagination', async () => {
   const fetch = vi.fn().mockImplementation((url: string) => {
     if (url === '/api/auth/state')
@@ -28,7 +30,10 @@ it('filters administrator audit records and follows bounded pagination', async (
               created_at: 1900000000,
             },
           ],
-          next_cursor: url.includes('cursor=52') ? 0 : 52,
+          next_cursor: url.includes('page=2') ? 0 : 52,
+          total: 51,
+          page: url.includes('page=2') ? 2 : 1,
+          page_size: 50,
         }),
       )
     return Promise.reject(new Error('Unexpected request'))
@@ -45,9 +50,7 @@ it('filters administrator audit records and follows bounded pagination', async (
   await screen.findByText('Updated API key')
   await user.click(screen.getByRole('button', { name: 'Next' }))
   await waitFor(() =>
-    expect(fetch.mock.calls.some(([url]) => url.includes('cursor=52'))).toBe(
-      true,
-    ),
+    expect(fetch.mock.calls.some(([url]) => url.includes('page=2'))).toBe(true),
   )
   await user.click(screen.getByRole('button', { name: 'Resource type' }))
   await user.click(
@@ -56,7 +59,7 @@ it('filters administrator audit records and follows bounded pagination', async (
   await waitFor(() =>
     expect(
       fetch.mock.calls.some(
-        ([url]) => url.includes('cursor=0') && url.includes('resource=group'),
+        ([url]) => url.includes('page=1') && url.includes('resource=group'),
       ),
     ).toBe(true),
   )

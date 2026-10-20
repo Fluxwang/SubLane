@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	core "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	core "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // CatalogSource invalidates cached discovery when its request contract changes.

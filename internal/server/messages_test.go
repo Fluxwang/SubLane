@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,60 @@ import (
 )
 
 const syntheticMessage = `{"id":"msg_synthetic","type":"message","role":"assistant","model":"synthetic-model","content":[{"type":"thinking","thinking":"Synthetic reasoning","signature":"synthetic-signature"},{"type":"tool_use","id":"tool_synthetic","name":"read_file","input":{"path":"example.txt"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":5,"cache_creation_input_tokens":3,"cache_read_input_tokens":12,"output_tokens":7}}`
+
+func TestMessagesPreserveClaudeCodeControlTurns(t *testing.T) {
+	turns := []map[string]any{
+		{"role": "user", "content": []map[string]string{{"type": "text", "text": "Synthetic prompt"}}},
+		{"role": "system", "content": []map[string]string{}, "output_config": map[string]string{"effort": "medium"}},
+		{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "tool_previous", "name": "read_file", "input": map[string]string{"path": "example.txt"}}}},
+		{"role": "user", "content": []map[string]string{{"type": "tool_result", "tool_use_id": "tool_previous", "content": "Synthetic result"}}},
+		{"role": "system", "content": []map[string]string{{"type": "text", "text": "Synthetic updated instruction"}}, "cache_control": map[string]string{"type": "ephemeral"}},
+	}
+	want, _ := json.Marshal(turns)
+	var expected any
+	if err := json.Unmarshal(want, &expected); err != nil {
+		t.Fatal(err)
+	}
+	f := newProviderFixture(t, "claude", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages any  `json:"messages"`
+			Stream   bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(request.Messages, expected) {
+			t.Error("Claude Code control turns or tool history changed")
+		}
+		if request.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			io.WriteString(w, "data: "+syntheticMessageEvents()+"\n\n")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, syntheticMessage)
+		}
+	})
+	for _, stream := range []bool{false, true} {
+		body, err := json.Marshal(map[string]any{
+			"model": "synthetic-model", "max_tokens": 1024, "stream": stream, "messages": turns,
+			"system":        []map[string]any{{"type": "text", "text": "Synthetic system", "cache_control": map[string]string{"type": "ephemeral"}}},
+			"tools":         []map[string]any{{"name": "read_file", "input_schema": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]string{"type": "string"}}}}},
+			"thinking":      map[string]string{"type": "adaptive", "display": "omitted"},
+			"output_config": map[string]string{"effort": "medium"},
+			"metadata":      map[string]string{"user_id": "synthetic-client-session"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, raw := messageRequest(t, f, "POST", "/v1/messages?beta=true", string(body), http.Header{"X-Api-Key": {f.secret}, "Anthropic-Beta": {"mid-conversation-system-2026-04-07"}})
+		if response.StatusCode != 200 || !strings.Contains(raw, "tool_synthetic") || !strings.Contains(raw, "synthetic-signature") {
+			t.Fatalf("Claude Code request failed (stream=%t): %d %s", stream, response.StatusCode, raw)
+		}
+		if stream && (!strings.Contains(raw, "event: message_stop\n") || strings.Contains(raw, "[DONE]")) {
+			t.Fatalf("invalid Claude Code stream: %s", raw)
+		}
+	}
+}
 
 func syntheticMessageEvents() string {
 	return strings.Join([]string{

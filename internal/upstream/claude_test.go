@@ -229,6 +229,88 @@ func TestClaudeNativeAdaptiveAndResponsesRequests(t *testing.T) {
 	}
 }
 
+func TestClaudePreservedThinkingReplay(t *testing.T) {
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+		for _, stream := range []bool{false, true} {
+			for _, policy := range []string{"", "error"} {
+				name := model + "/http"
+				if stream {
+					name = model + "/stream"
+				}
+				wantPolicy := policy
+				if wantPolicy == "" {
+					wantPolicy = "drop_block"
+				}
+				t.Run(name+"/"+wantPolicy, func(t *testing.T) {
+					calls := 0
+					client := NewWithTransport(usageTransport(func(r *http.Request) (*http.Response, error) {
+						calls++
+						raw, err := io.ReadAll(r.Body)
+						if err != nil {
+							return nil, err
+						}
+						var body struct {
+							Thinking struct {
+								Type         string `json:"type"`
+								BlockBinding struct {
+									Policy string `json:"prefix_mismatch_behavior"`
+								} `json:"block_binding"`
+							} `json:"thinking"`
+						}
+						if err := json.Unmarshal(raw, &body); err != nil {
+							return nil, err
+						}
+						if body.Thinking.Type != "adaptive" || body.Thinking.BlockBinding.Policy != wantPolicy {
+							t.Errorf("replayed thinking lost its binding policy: type=%s policy=%s, want adaptive/%s", body.Thinking.Type, body.Thinking.BlockBinding.Policy, wantPolicy)
+						}
+						if !strings.Contains(string(raw), "synthetic-redacted-thinking") {
+							t.Error("replayed thinking was lost")
+						}
+						var betas string
+						// The SDK preserves lowercase wire headers in its CLI profile.
+						for key, values := range r.Header {
+							if strings.EqualFold(key, "Anthropic-Beta") {
+								betas = strings.Join(values, ",")
+							}
+						}
+						if !strings.Contains(betas, "thinking-binding-controls-2026-08-01") {
+							t.Errorf("replayed thinking lost its required beta header: %s", betas)
+						}
+						if stream {
+							return syntheticClaudeStream(), nil
+						}
+						return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"msg_synthetic","type":"message","role":"assistant","model":"` + model + `","content":[{"type":"text","text":"Synthetic response."}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))}, nil
+					}))
+					defer client.Close()
+					thinking := map[string]any{"type": "adaptive"}
+					if policy != "" {
+						thinking["block_binding"] = map[string]string{"prefix_mismatch_behavior": policy}
+					}
+					raw, err := json.Marshal(map[string]any{
+						"model": model, "max_tokens": 128, "stream": stream, "thinking": thinking,
+						"messages": []map[string]any{
+							{"role": "user", "content": "Synthetic prompt."},
+							{"role": "assistant", "content": []map[string]string{{"type": "redacted_thinking", "data": "synthetic-redacted-thinking"}, {"type": "text", "text": "Synthetic earlier response."}}},
+							{"role": "user", "content": "Synthetic continuation."},
+						},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					response, err := client.Messages(context.Background(), syntheticClaudeCredential(), raw, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer response.Body.Close()
+					if _, err := io.ReadAll(response.Body); err != nil || response.StatusCode != 200 || calls != 1 {
+						t.Fatal("replayed thinking request failed", err, response.StatusCode, calls)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestAdaptiveClaudeRejectsUnsupportedNativeControlsBeforeIO(t *testing.T) {
 	calls := 0
 	client := NewWithTransport(usageTransport(func(*http.Request) (*http.Response, error) {

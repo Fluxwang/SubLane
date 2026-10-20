@@ -20,10 +20,10 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	f, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("create database: %w", err)
 	}

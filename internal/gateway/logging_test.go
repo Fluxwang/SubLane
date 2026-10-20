@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +17,98 @@ import (
 	"github.com/murongg/SubLane/internal/logging"
 	"github.com/murongg/SubLane/internal/upstream"
 )
+
+func TestUpstreamFailureDiagnostics(t *testing.T) {
+	const private = "synthetic-private-body sk-synthetic-secret https://user:password@example.test/private?token=synthetic-token"
+	for _, tc := range []struct {
+		name, code, kind, stage string
+		operation               Kind
+		status, errorStatus     int
+		network                 bool
+	}{
+		{"Responses failed after 200", "server_error", "http_error", "stream", Responses, 200, 502, false},
+		{"Messages failed after 200", "server_error", "http_error", "stream", Messages, 200, 502, false},
+		{"HTTP rejection", "permission_denied", "http_error", "execute", Responses, 403, 403, false},
+		{"Compact HTTP rejection", "permission_denied", "http_error", "execute", Compact, 403, 403, false},
+		{"Unknown provider code", "unknown", "http_error", "stream", Messages, 200, 502, false},
+		{"DNS failure", "", "dns_error", "execute", Responses, 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := tc.code
+			if code == "unknown" {
+				code = "synthetic-private-code"
+			}
+			errorBody, err := json.Marshal(map[string]any{"error": map[string]string{"code": code, "type": "server_error", "message": private}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, ids := codexGateway(t, transportFunc(func(r *http.Request) (*http.Response, error) {
+				if tc.network {
+					return nil, &url.Error{Op: "Post", URL: "https://user:password@example.test/?token=synthetic-token", Err: &net.DNSError{Name: "synthetic-private-host", Err: "synthetic-private-dns"}}
+				}
+				body := string(errorBody)
+				if tc.status == 200 {
+					body = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_synthetic\",\"output\":[]}}\n\n" +
+						"data: {\"type\":\"response.failed\",\"response\":" + body + "}\n\n"
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"req_synthetic_upstream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+			}))
+			s.policy.Retries = 0
+			var buffer bytes.Buffer
+			ctx := logging.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buffer, nil)))
+			ctx = WithRequestIdentity(ctx, 42, "http")
+			request := []byte(`{"model":"synthetic-model","input":"synthetic-private-prompt"}`)
+			if tc.operation == Messages {
+				request = []byte(`{"model":"synthetic-model","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"synthetic-private-prompt"}]}`)
+			}
+			x, err := s.Open(ctx, 1, 1, request, nil, tc.operation)
+			if err == nil {
+				if x.StatusCode == 200 {
+					err = x.Events(func([]byte) error { return nil })
+					if err == nil {
+						t.Fatal("synthetic failed stream succeeded")
+					}
+				}
+				x.Body.Close()
+			}
+			var diagnostic map[string]any
+			count := 0
+			for _, record := range gatewayLogRecords(t, &buffer) {
+				if record["msg"] == "Upstream request failed" {
+					diagnostic = record
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("expected one upstream diagnostic, got %d: %s", count, buffer.String())
+			}
+			if diagnostic["request_id"] != RequestID(ctx) || diagnostic["provider"] != "codex" || diagnostic["account_id"] != ids["codex"] || diagnostic["stage"] != tc.stage || diagnostic["upstream_error_kind"] != tc.kind {
+				t.Fatal("upstream diagnostic lost correlation or failure stage", diagnostic)
+			}
+			if tc.status != 0 && (diagnostic["upstream_status"] != float64(tc.status) || diagnostic["upstream_request_id"] != "req_synthetic_upstream") {
+				t.Fatal("actual HTTP status or upstream request ID lost", diagnostic)
+			}
+			if tc.errorStatus != 0 && diagnostic["upstream_error_status"] != float64(tc.errorStatus) {
+				t.Fatal("SDK error status lost", diagnostic)
+			}
+			if tc.code != "" && diagnostic["upstream_error_code"] != tc.code {
+				t.Fatal("safe provider error code lost", diagnostic)
+			}
+			page, err := s.Requests(context.Background(), RequestFilter{RequestID: RequestID(ctx)})
+			if err != nil || len(page.Requests) != 1 || page.Requests[0].Outcome != "error" {
+				t.Fatal("failed request accounting changed", err)
+			}
+			if tc.status == 200 && (page.Requests[0].ErrorCode != "upstream_unavailable" || page.Requests[0].UpstreamStatus == nil || *page.Requests[0].UpstreamStatus != 200) {
+				t.Fatal("diagnostics changed failed-stream classification", page.Requests[0])
+			}
+			for _, secret := range []string{"synthetic-private", "sk-synthetic", "user:password", "example.test", "synthetic-token"} {
+				if strings.Contains(buffer.String(), secret) {
+					t.Fatalf("diagnostic exposed private content: %s", secret)
+				}
+			}
+		})
+	}
+}
 
 func gatewayLogRecords(t *testing.T, buffer *bytes.Buffer) []map[string]any {
 	t.Helper()
@@ -50,11 +144,11 @@ func TestRetryLogsSafeAttemptMetadata(t *testing.T) {
 	}
 	x.Body.Close()
 	logs := gatewayLogRecords(t, &buffer)
-	if len(logs) != 1 || logs[0]["msg"] != "Gateway upstream retry" || logs[0]["upstream_status"] != float64(503) || logs[0]["attempt"] != float64(1) || logs[0]["account_id"] != ids["codex"] {
+	if len(logs) != 2 || logs[0]["msg"] != "Upstream request failed" || logs[1]["msg"] != "Gateway upstream retry" || logs[1]["upstream_status"] != float64(503) || logs[1]["attempt"] != float64(1) || logs[1]["account_id"] != ids["codex"] {
 		t.Fatalf("retry lost safe attempt diagnostics: %+v", logs)
 	}
 	page, err := s.Requests(context.Background(), RequestFilter{})
-	if err != nil || len(page.Requests) != 1 || logs[0]["request_id"] != page.Requests[0].RequestID {
+	if err != nil || len(page.Requests) != 1 || logs[0]["request_id"] != page.Requests[0].RequestID || logs[1]["request_id"] != page.Requests[0].RequestID {
 		t.Fatal("retry correlation was lost", err)
 	}
 	if strings.Contains(buffer.String(), "synthetic-upstream-secret") || strings.Contains(buffer.String(), "synthetic-request-secret") {

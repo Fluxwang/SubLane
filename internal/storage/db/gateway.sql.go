@@ -21,7 +21,7 @@ func (q *Queries) CountAccountAffinity(ctx context.Context) (int64, error) {
 }
 
 const createAccountAffinity = `-- name: CreateAccountAffinity :exec
-INSERT INTO account_affinity(user_id, group_id, session_hash, provider, account_id, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+INSERT INTO account_affinity(user_id, group_id, session_hash, provider, account_id, expires_at, model) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
 `
 
 type CreateAccountAffinityParams struct {
@@ -31,6 +31,7 @@ type CreateAccountAffinityParams struct {
 	Provider    string
 	AccountID   string
 	ExpiresAt   int64
+	Model       string
 }
 
 func (q *Queries) CreateAccountAffinity(ctx context.Context, arg CreateAccountAffinityParams) error {
@@ -41,12 +42,13 @@ func (q *Queries) CreateAccountAffinity(ctx context.Context, arg CreateAccountAf
 		arg.Provider,
 		arg.AccountID,
 		arg.ExpiresAt,
+		arg.Model,
 	)
 	return err
 }
 
 const listSessionAffinities = `-- name: ListSessionAffinities :many
-SELECT provider, account_id, expires_at FROM account_affinity
+SELECT provider, account_id, expires_at, model FROM account_affinity
 WHERE user_id = ?1 AND group_id = ?2
 AND session_hash = ?3 AND expires_at > ?4
 ORDER BY provider
@@ -63,6 +65,7 @@ type ListSessionAffinitiesRow struct {
 	Provider  string
 	AccountID string
 	ExpiresAt int64
+	Model     string
 }
 
 func (q *Queries) ListSessionAffinities(ctx context.Context, arg ListSessionAffinitiesParams) ([]ListSessionAffinitiesRow, error) {
@@ -79,7 +82,12 @@ func (q *Queries) ListSessionAffinities(ctx context.Context, arg ListSessionAffi
 	items := []ListSessionAffinitiesRow{}
 	for rows.Next() {
 		var i ListSessionAffinitiesRow
-		if err := rows.Scan(&i.Provider, &i.AccountID, &i.ExpiresAt); err != nil {
+		if err := rows.Scan(
+			&i.Provider,
+			&i.AccountID,
+			&i.ExpiresAt,
+			&i.Model,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -102,12 +110,43 @@ func (q *Queries) PruneAccountAffinity(ctx context.Context, now int64) error {
 	return err
 }
 
+const replaceAccountAffinity = `-- name: ReplaceAccountAffinity :exec
+UPDATE account_affinity SET account_id = ?1, model = ?2, expires_at = ?3
+WHERE user_id = ?4 AND group_id = ?5 AND session_hash = ?6 AND provider = ?7
+`
+
+type ReplaceAccountAffinityParams struct {
+	AccountID   string
+	Model       string
+	ExpiresAt   int64
+	UserID      int64
+	GroupID     int64
+	SessionHash []byte
+	Provider    string
+}
+
+func (q *Queries) ReplaceAccountAffinity(ctx context.Context, arg ReplaceAccountAffinityParams) error {
+	_, err := q.db.ExecContext(ctx, replaceAccountAffinity,
+		arg.AccountID,
+		arg.Model,
+		arg.ExpiresAt,
+		arg.UserID,
+		arg.GroupID,
+		arg.SessionHash,
+		arg.Provider,
+	)
+	return err
+}
+
 const touchAccountAffinity = `-- name: TouchAccountAffinity :exec
-UPDATE account_affinity SET expires_at = ?1 WHERE user_id = ?2 AND group_id = ?3 AND session_hash = ?4 AND provider = ?5 AND expires_at < ?6
+UPDATE account_affinity SET expires_at = ?1, model = ?2
+WHERE user_id = ?3 AND group_id = ?4 AND session_hash = ?5 AND provider = ?6
+AND (expires_at < ?7 OR model != ?2)
 `
 
 type TouchAccountAffinityParams struct {
 	ExpiresAt   int64
+	Model       string
 	UserID      int64
 	GroupID     int64
 	SessionHash []byte
@@ -118,6 +157,7 @@ type TouchAccountAffinityParams struct {
 func (q *Queries) TouchAccountAffinity(ctx context.Context, arg TouchAccountAffinityParams) error {
 	_, err := q.db.ExecContext(ctx, touchAccountAffinity,
 		arg.ExpiresAt,
+		arg.Model,
 		arg.UserID,
 		arg.GroupID,
 		arg.SessionHash,

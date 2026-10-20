@@ -23,7 +23,7 @@ func leaseSyntheticModel(t *testing.T, s *Service) *observation {
 	}
 	e.record.Model = "antigravity/synthetic-model"
 	e.record.Provider = "antigravity"
-	id, _, err := s.leaseAccount(context.Background(), e, "", "antigravity", "synthetic-model", Gemini)
+	id, _, err := s.leaseAccount(context.Background(), e, "", "antigravity", "synthetic-model", Gemini, pinnedAffinity)
 	if err != nil {
 		e.fail(err)
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestModelCooldownSerializesRecovery(t *testing.T) {
 	}
 	entry.record.Model = "antigravity/synthetic-model"
 	entry.record.Provider = "antigravity"
-	bound, _, err := s.leaseAccount(context.Background(), entry, "", "antigravity", "synthetic-model", Gemini)
+	bound, _, err := s.leaseAccount(context.Background(), entry, "", "antigravity", "synthetic-model", Gemini, pinnedAffinity)
 	if err != nil || bound != id {
 		t.Fatal("recovery request rejected", bound, err)
 	}

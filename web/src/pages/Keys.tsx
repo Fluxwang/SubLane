@@ -1,15 +1,16 @@
+import { Pagination } from '@/components/Pagination'
+import { TableViewport } from '@/components/TableViewport'
+import { useTablePagination } from '@/lib/pagination'
 import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Eye,
-  EyeOff,
-  KeyRound,
-  LoaderCircle,
-  TriangleAlert,
-} from 'lucide-react'
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { KeyRound, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
-import { keyOptions, keyState, type APIKey, type KeyPage } from '@/lib/keys'
+import { keyOptions, keyState } from '@/lib/keys'
 import { CreateKey } from '@/components/CreateKey'
 import { CatalogDialog } from '@/components/CatalogDialog'
 import { CopyKey } from '@/components/CopyKey'
@@ -33,12 +34,15 @@ function KeyManager({ userID }: { userID: number }) {
   const timeZone = useTimeZone()
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
-  const [cursors, setCursors] = useState([0])
-  const [showRevoked, setShowRevoked] = useState(false)
-  const [revokedNotice, setRevokedNotice] = useState(false)
-  const query = useQuery(
-    keyOptions(client, userID, cursors[cursors.length - 1], showRevoked),
-  )
+  const { page, pageSize, viewport, changePage, changePageSize, syncPage } =
+    useTablePagination()
+  const [includeRevoked, setIncludeRevoked] = useState(false)
+  const [revokedName, setRevokedName] = useState('')
+  const query = useQuery({
+    ...keyOptions(client, userID, page, includeRevoked, pageSize),
+    placeholderData: keepPreviousData,
+  })
+  syncPage(query.data?.page, query.isPlaceholderData)
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000)
@@ -54,51 +58,12 @@ function KeyManager({ userID }: { userID: number }) {
       client.invalidateQueries({ queryKey: ['system'] }),
     ])
   }
-  const onRevoked = async (revokedKey: APIKey) => {
-    const filter = { queryKey: ['keys', userID] }
-    // Cancel older reads before publishing the confirmed mutation, then refill filtered pages.
-    await client.cancelQueries(filter)
-    for (const [queryKey, page] of client.getQueriesData<KeyPage>(filter)) {
-      if (!page) continue
-      const included = queryKey[3] === true
-      client.setQueryData<KeyPage>(queryKey, {
-        ...page,
-        revoked_count: page.revoked_count + 1,
-        keys: included
-          ? page.keys.map((key) =>
-              key.id === revokedKey.id ? { ...key, ...revokedKey } : key,
-            )
-          : page.keys.filter((key) => key.id !== revokedKey.id),
-      })
-    }
-    setRevokedNotice(!showRevoked)
-    setCursors([0])
-    await invalidate()
-  }
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     timeZone,
     dateStyle: 'medium',
   })
-  // Like the usage report, token units and USD amounts keep one form in every interface language.
-  const compactTokens = new Intl.NumberFormat('en', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  })
-  const usd = new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency: 'USD',
-  })
-  // Without any priced reported tokens there is no estimate; an em dash avoids reading as free.
-  const cost = (usage: KeyPage['keys'][number]['usage']) =>
-    (usage.input_reported === 0 && usage.output_reported === 0) ||
-    usage.unpriced_tokens >= usage.input_tokens + usage.output_tokens
-      ? '—'
-      : usage.estimated_micro_usd > 0 && usage.estimated_micro_usd < 10_000
-        ? t('usageCostBelow', { value: usd.format(0.01) })
-        : usd.format(usage.estimated_micro_usd / 1_000_000)
-  const allRevoked = !showRevoked && (query.data?.revoked_count ?? 0) > 0
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 ref={heading} tabIndex={-1} className="page-title outline-none">
@@ -110,54 +75,43 @@ function KeyManager({ userID }: { userID: number }) {
           <CreateKey
             userID={userID}
             onCreated={() => {
-              setCursors([0])
+              setRevokedName('')
+              changePage(1)
               return invalidate()
             }}
           />
         </div>
       </div>
-      <p
-        data-tour="access"
-        tabIndex={-1}
-        className="text-sm leading-6 text-muted-foreground"
-      >
-        {t('gatewayKeysNotice')}
-      </p>
-      {revokedNotice && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {t('keyRevokedNotice')}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <p
+          data-tour="access"
+          tabIndex={-1}
+          className="text-sm leading-6 text-muted-foreground"
+        >
+          {t('gatewayKeysNotice')}
         </p>
-      )}
-      {query.data && (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            {t('keyCostNote', {
-              date: dates.format(query.data.key_tracking_since * 1000),
-            })}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto text-muted-foreground aria-pressed:text-foreground"
-            aria-pressed={showRevoked}
-            disabled={
-              query.isFetching ||
-              (!showRevoked && query.data.revoked_count === 0)
-            }
-            onClick={() => {
-              setCursors([0])
-              setRevokedNotice(false)
-              setShowRevoked((value) => !value)
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            className="peer sr-only"
+            checked={includeRevoked}
+            onChange={(event) => {
+              setIncludeRevoked(event.target.checked)
+              changePage(1)
             }}
-          >
-            {showRevoked ? (
-              <EyeOff aria-hidden="true" />
-            ) : (
-              <Eye aria-hidden="true" />
-            )}
-            {t('showRevokedKeys', { count: query.data.revoked_count })}
-          </Button>
-        </div>
+          />
+          <span
+            aria-hidden="true"
+            className="relative h-5 w-9 shrink-0 rounded-full bg-muted-foreground/30 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-background after:transition-transform peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background motion-reduce:transition-none motion-reduce:after:transition-none"
+          />
+          <span>{t('showRevokedKeys')}</span>
+        </label>
+      </div>
+      {revokedName && (
+        <p role="status" className="break-words text-sm text-success">
+          {t('keyRevokedNotice', { name: revokedName })}
+        </p>
       )}
       {query.isPending ? (
         <p
@@ -191,30 +145,18 @@ function KeyManager({ userID }: { userID: number }) {
             aria-hidden="true"
           />
           <h2 className="font-medium">
-            {allRevoked
-              ? t('noUsableKeys', { count: query.data.revoked_count })
-              : t('noKeys')}
+            {t(includeRevoked ? 'noKeys' : 'noUnrevokedKeys')}
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            {t(allRevoked ? 'noUsableKeysDescription' : 'noKeysDescription')}
+            {t(
+              includeRevoked
+                ? 'noKeysDescription'
+                : 'noUnrevokedKeysDescription',
+            )}
           </p>
-          {allRevoked && (
-            <Button
-              className="mt-4"
-              variant="outline"
-              disabled={query.isFetching}
-              onClick={() => {
-                setCursors([0])
-                setRevokedNotice(false)
-                setShowRevoked(true)
-              }}
-            >
-              {t('showRevoked')}
-            </Button>
-          )}
         </section>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <TableViewport ref={viewport} aria-busy={query.isFetching}>
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-muted-foreground">
               <tr>
@@ -226,9 +168,6 @@ function KeyManager({ userID }: { userID: number }) {
                 </th>
                 <th scope="col" className="px-5 py-3 font-medium">
                   {t('keyLastUsed')}
-                </th>
-                <th scope="col" className="px-5 py-3 font-medium">
-                  {t('keyCost')}
                 </th>
                 <th scope="col" className="px-5 py-3 text-right font-medium">
                   {t('actions')}
@@ -297,34 +236,6 @@ function KeyManager({ userID }: { userID: number }) {
                       ? t('neverUsed')
                       : dates.format(key.last_used_at * 1000)}
                   </td>
-                  <td className="whitespace-nowrap px-5 py-4">
-                    <span className="inline-flex items-center gap-1.5 font-medium tabular-nums">
-                      {cost(key.usage)}
-                      {key.usage.unpriced_tokens > 0 && (
-                        <span
-                          role="img"
-                          aria-label={t('keyCostUnpriced')}
-                          title={t('keyCostUnpriced')}
-                          className="text-warning"
-                        >
-                          <TriangleAlert
-                            className="size-3.5"
-                            aria-hidden="true"
-                          />
-                        </span>
-                      )}
-                    </span>
-                    {(key.usage.input_reported > 0 ||
-                      key.usage.output_reported > 0) && (
-                      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-                        {t('keyLifetimeTokens', {
-                          value: compactTokens.format(
-                            key.usage.input_tokens + key.usage.output_tokens,
-                          ),
-                        })}
-                      </p>
-                    )}
-                  </td>
                   <td className="px-5 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       <ClientGuide
@@ -340,7 +251,12 @@ function KeyManager({ userID }: { userID: number }) {
                       <EditKey value={key} onSaved={invalidate} />
                       <RevokeKey
                         value={key}
-                        onRevoked={onRevoked}
+                        onRevoked={() => {
+                          setRevokedName(key.name)
+                          // Keep the remaining usable keys visible after removing a row.
+                          changePage(1)
+                          return invalidate()
+                        }}
                         focusAfterRevoke={() => heading.current?.focus()}
                       />
                     </div>
@@ -349,27 +265,17 @@ function KeyManager({ userID }: { userID: number }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
-      {query.data && (cursors.length > 1 || query.data.next_cursor !== 0) && (
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            disabled={cursors.length === 1 || query.isFetching}
-            onClick={() => setCursors((value) => value.slice(0, -1))}
-          >
-            {t('previousPage')}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!query.data.next_cursor || query.isFetching}
-            onClick={() =>
-              setCursors((value) => [...value, query.data.next_cursor])
-            }
-          >
-            {t('nextPage')}
-          </Button>
-        </div>
+      {query.data && (
+        <Pagination
+          page={query.data.page}
+          pageSize={query.data.page_size}
+          total={query.data.total}
+          disabled={query.isFetching}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
       )}
     </div>
   )

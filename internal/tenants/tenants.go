@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/murongg/SubLane/internal/audit"
+	"github.com/murongg/SubLane/internal/pagination"
 	storageDB "github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -52,6 +53,7 @@ type MemberSummary struct {
 }
 
 type MemberPage struct {
+	pagination.Metadata
 	Members    []MemberSummary `json:"members"`
 	NextCursor int64           `json:"next_cursor"`
 }
@@ -61,11 +63,26 @@ type Service struct{ db *sql.DB }
 func New(db *sql.DB) *Service { return &Service{db: db} }
 
 func (s *Service) ListMembers(ctx context.Context, tenantID, beforeID int64) (MemberPage, error) {
+	return s.ListMembersPage(ctx, tenantID, pagination.Input{Cursor: beforeID})
+}
+
+func (s *Service) ListMembersPage(ctx context.Context, tenantID int64, bounds pagination.Input) (MemberPage, error) {
 	page := MemberPage{Members: []MemberSummary{}}
-	if beforeID < 0 {
+	if !bounds.Valid() {
 		return page, ErrInput
 	}
-	rows, err := storageDB.New(s.db).ListTenantMembers(ctx, storageDB.ListTenantMembersParams{TenantID: tenantID, BeforeID: beforeID})
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return page, err
+	}
+	defer tx.Rollback()
+	q := storageDB.New(tx)
+	total, err := q.CountTenantMembers(ctx, tenantID)
+	if err != nil {
+		return page, err
+	}
+	page.Metadata = bounds.Resolve(total)
+	rows, err := q.ListTenantMembers(ctx, storageDB.ListTenantMembersParams{TenantID: tenantID, BeforeID: bounds.Cursor, PageLimit: page.PageSize + 1, PageOffset: page.Offset()})
 	if err != nil {
 		return page, err
 	}
@@ -73,11 +90,11 @@ func (s *Service) ListMembers(ctx context.Context, tenantID, beforeID int64) (Me
 		page.Members = append(page.Members, MemberSummary{ID: row.ID, Username: row.Username,
 			Role: Role(row.Role), Enabled: row.Enabled == 1 && row.UserEnabled, CreatedAt: row.CreatedAt})
 	}
-	if len(page.Members) > 50 {
-		page.Members = page.Members[:50]
-		page.NextCursor = page.Members[49].ID
+	if int64(len(page.Members)) > page.PageSize {
+		page.Members = page.Members[:page.PageSize]
+		page.NextCursor = page.Members[len(page.Members)-1].ID
 	}
-	return page, nil
+	return page, tx.Commit()
 }
 
 func (s *Service) SetMemberEnabled(ctx context.Context, actorID, tenantID, userID int64, enabled bool) (MemberSummary, error) {

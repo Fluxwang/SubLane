@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	exec "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator/builtin"
+	exec "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/translator/builtin"
 )
 
 // Public Codex OAuth identifiers. Protocol headers are owned by this adapter.
