@@ -6,6 +6,7 @@ import {
   type Scheme,
   type SchemeInput,
   type AllocationMode,
+  type AllocationKeyCandidate,
   modeLabels,
   parseAllocationValue,
   allocationValue,
@@ -13,6 +14,7 @@ import {
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { AllocationPriceWarning } from './AllocationPriceWarning'
+import { KeyShareFields } from './KeyShareFields'
 
 import {
   DropdownMenu,
@@ -92,6 +94,7 @@ export function SchemeForm({
   groupID,
   onGroupChange,
   members,
+  keys = [],
   scheme,
   onSubmit,
   onCancel,
@@ -101,6 +104,7 @@ export function SchemeForm({
   groupID: number
   onGroupChange: (id: number) => void
   members: { id: number; username: string }[]
+  keys?: AllocationKeyCandidate[]
   scheme?: Scheme
   onSubmit: (input: SchemeInput) => void
   onCancel: () => void
@@ -126,7 +130,7 @@ export function SchemeForm({
       : '',
   )
   const [windowRules, setWindowRules] = useState<WindowDraft[]>(
-    initial?.mode === 'windows'
+    initial?.mode === 'windows' || initial?.mode === 'keys'
       ? (initial.windows ?? []).map((rule, index) => ({
           id: `saved-${index}`,
           duration: String(
@@ -193,8 +197,41 @@ export function SchemeForm({
         : [],
     ),
   )
+  const [selectedKeys, setSelectedKeys] = useState<Record<number, boolean>>(
+    Object.fromEntries(initial?.keys?.map((key) => [key.key_id, true]) ?? []),
+  )
+  const [keyShares, setKeyShares] = useState<
+    Record<number, Record<string, string>>
+  >(
+    Object.fromEntries(
+      initial?.keys?.map((key): [number, Record<string, string>] => [
+        key.key_id,
+        Object.fromEntries(
+          key.shares.flatMap((share) => {
+            const index = (initial.windows ?? []).findIndex(
+              (rule) => rule.duration_seconds === share.duration_seconds,
+            )
+            return index < 0
+              ? []
+              : [[`saved-${index}`, allocationValue(share.share, 'ratio')]]
+          }),
+        ),
+      ]) ?? [],
+    ),
+  )
   const [invalid, setInvalid] = useState(false)
   const shareMode = mode === 'ratio'
+  const keyMode = mode === 'keys'
+  const durationMode = mode === 'windows' || keyMode
+  const windowLabel = (rule: WindowDraft, index: number) =>
+    durationSeconds(rule) === null
+      ? t('allocationCondition', { index: index + 1 })
+      : t(
+          rule.unit === 'days'
+            ? 'allocationDurationDays'
+            : 'allocationDurationHours',
+          { value: rule.duration },
+        )
   const total = members.reduce(
     (sum, m) =>
       sum +
@@ -226,13 +263,15 @@ export function SchemeForm({
   const changeMode = (next: AllocationMode) => {
     if (next !== mode) {
       setMode(next)
-      if (next === 'windows') setPeriod('durations')
+      if (next === 'windows' || next === 'keys') setPeriod('durations')
       else if (period === 'durations') setPeriod('month')
       setValues({})
       setWindowRules([])
       setSelectedMembers({})
       setMemberCustomization({})
       setWindowOverrideValues({})
+      setSelectedKeys({})
+      setKeyShares({})
       setInvalid(false)
     }
   }
@@ -241,13 +280,30 @@ export function SchemeForm({
     if (pending) return
     const windowLimit = (value: string | undefined) =>
       parseAllocationValue(value?.trim() ? value : '0', 'amount') ?? -1
-    const parsedWindows =
-      mode === 'windows'
-        ? windowRules.map((rule) => ({
-            duration_seconds: durationSeconds(rule) ?? -1,
-            limit: windowLimit(rule.limit),
+    const parsedWindows = durationMode
+      ? windowRules.map((rule) => ({
+          duration_seconds: durationSeconds(rule) ?? -1,
+          // Key shares are percentages of the budget, so every key-share window needs one.
+          limit: keyMode
+            ? (parseAllocationValue(rule.limit.trim(), 'amount') ?? -1)
+            : windowLimit(rule.limit),
+        }))
+      : []
+    const keyConfig = keyMode
+      ? keys
+          .filter((key) => selectedKeys[key.id])
+          .map((key) => ({
+            key_id: key.id,
+            shares: windowRules.map((rule, index) => ({
+              duration_seconds: parsedWindows[index].duration_seconds,
+              share:
+                parseAllocationValue(
+                  keyShares[key.id]?.[rule.id]?.trim() ?? '',
+                  'ratio',
+                ) ?? -1,
+            })),
           }))
-        : []
+      : []
     const shares = members
       .filter((m) => selectedMembers[m.id])
       .map((m) => {
@@ -285,14 +341,18 @@ export function SchemeForm({
     const bad =
       !name.trim() ||
       !groupID ||
-      (mode !== 'windows' &&
-        !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(resetTime)) ||
+      (!durationMode && !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(resetTime)) ||
       (period === 'month' &&
         (!/^\d{1,2}$/.test(resetDay) ||
           Number(resetDay) < 1 ||
           Number(resetDay) > 31)) ||
-      shares.length === 0 ||
-      (mode === 'windows' &&
+      (!keyMode && shares.length === 0) ||
+      (keyMode &&
+        (parsedWindows.some((rule) => rule.limit <= 0) ||
+          keyConfig.some((key) =>
+            key.shares.some((share) => share.share < 0 || share.share > 10000),
+          ))) ||
+      (durationMode &&
         (parsedWindows.length === 0 ||
           parsedWindows.length > 8 ||
           new Set(parsedWindows.map((rule) => rule.duration_seconds)).size !==
@@ -300,11 +360,12 @@ export function SchemeForm({
           parsedWindows.some(
             (rule) => rule.duration_seconds < 3600 || rule.limit < 0,
           ))) ||
-      shares.some((m) =>
-        mode === 'windows'
-          ? (m.window_overrides ?? []).some((override) => override.limit < 0)
-          : m.limit <= 0,
-      ) ||
+      (!keyMode &&
+        shares.some((m) =>
+          mode === 'windows'
+            ? (m.window_overrides ?? []).some((override) => override.limit < 0)
+            : m.limit <= 0,
+        )) ||
       (shareMode && total > 10000) ||
       (shareMode && !validShareBudget(totalBudget))
     setInvalid(bad)
@@ -320,10 +381,11 @@ export function SchemeForm({
         period,
         ...(period !== 'durations' ? { reset_time: resetTime } : {}),
         ...(period === 'month' ? { reset_day: Number(resetDay) } : {}),
-        members: shares,
+        members: keyMode ? [] : shares,
         rates: [],
         ...(shareMode ? { ratio_unit: ratioUnit, total: totalBudget } : {}),
-        ...(mode === 'windows' ? { windows: parsedWindows } : {}),
+        ...(durationMode ? { windows: parsedWindows } : {}),
+        ...(keyMode ? { keys: keyConfig } : {}),
       },
     })
   }
@@ -370,7 +432,11 @@ export function SchemeForm({
             </div>
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            {t('allocationExclusiveHint')}
+            {t(
+              keyMode
+                ? 'allocationKeysExclusiveHint'
+                : 'allocationExclusiveHint',
+            )}
           </p>
         </section>
         <section className="space-y-4 border-t border-border pt-7">
@@ -382,7 +448,7 @@ export function SchemeForm({
               {t('allocationMode')}
             </legend>
             <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
-              {(['ratio', 'amount', 'tokens', 'windows'] as const).map(
+              {(['ratio', 'amount', 'tokens', 'windows', 'keys'] as const).map(
                 (value) => (
                   <label
                     key={value}
@@ -393,6 +459,11 @@ export function SchemeForm({
                       name="allocation-mode"
                       value={value}
                       checked={mode === value}
+                      // The server keeps key-share and member schemes from switching into each other.
+                      disabled={
+                        !!scheme &&
+                        (value === 'keys') !== (scheme.config.mode === 'keys')
+                      }
                       onChange={() => changeMode(value)}
                       aria-label={t(modeLabels[value])}
                       className="mt-0.5 size-4 accent-primary"
@@ -409,7 +480,9 @@ export function SchemeForm({
                               ? 'allocationModeAmountSummary'
                               : value === 'tokens'
                                 ? 'allocationModeTokensSummary'
-                                : 'allocationModeWindowsSummary',
+                                : value === 'windows'
+                                  ? 'allocationModeWindowsSummary'
+                                  : 'allocationModeKeysSummary',
                         )}
                       </span>
                     </span>
@@ -475,7 +548,7 @@ export function SchemeForm({
                 </div>
               </div>
             )}
-            {mode === 'windows' && (
+            {durationMode && (
               <div className="space-y-3 sm:col-span-2">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -483,7 +556,11 @@ export function SchemeForm({
                       {t('allocationWindowConditions')}
                     </h4>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      {t('allocationWindowConditionsHint')}
+                      {t(
+                        keyMode
+                          ? 'allocationKeyWindowConditionsHint'
+                          : 'allocationWindowConditionsHint',
+                      )}
                     </p>
                   </div>
                   <Button
@@ -572,7 +649,12 @@ export function SchemeForm({
                           htmlFor={`window-limit-${rule.id}`}
                           className="text-sm"
                         >
-                          {t('allocationConditionLimit', { index: index + 1 })}
+                          {t(
+                            keyMode
+                              ? 'allocationConditionBudget'
+                              : 'allocationConditionLimit',
+                            { index: index + 1 },
+                          )}
                         </label>
                         <div className="flex items-center gap-2">
                           <Input
@@ -587,7 +669,9 @@ export function SchemeForm({
                                 ),
                               )
                             }
-                            placeholder={t('allocationUnlimited')}
+                            placeholder={
+                              keyMode ? undefined : t('allocationUnlimited')
+                            }
                             inputMode="decimal"
                             className="min-w-0 text-right tabular-nums"
                           />
@@ -617,7 +701,7 @@ export function SchemeForm({
                 </div>
               </div>
             )}
-            {mode !== 'windows' && (
+            {!durationMode && (
               <div className="space-y-2">
                 <label htmlFor="scheme-period" className="text-sm font-medium">
                   {t('allocationPeriod')}
@@ -681,9 +765,11 @@ export function SchemeForm({
               </div>
             )}
             <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
-              {period === 'durations'
-                ? t('allocationWindowDurationHint', { zone: timeZone })
-                : t('allocationResetZoneHint', { zone: timeZone })}{' '}
+              {keyMode
+                ? t('allocationKeyWindowHint')
+                : period === 'durations'
+                  ? t('allocationWindowDurationHint', { zone: timeZone })
+                  : t('allocationResetZoneHint', { zone: timeZone })}{' '}
               {period === 'month' && t('allocationResetShortMonthHint')}
             </p>
             {mode === 'windows' && longestDraftWindow > 0 && (
@@ -714,7 +800,7 @@ export function SchemeForm({
             )}
           </div>
           {(mode === 'amount' ||
-            mode === 'windows' ||
+            durationMode ||
             (shareMode && ratioUnit === 'amount')) && (
             <p className="text-sm leading-6 text-muted-foreground">
               {t('allocationAutoPricingHint')}
@@ -727,89 +813,228 @@ export function SchemeForm({
             />
           )}
         </section>
-        <section className="space-y-4 border-t border-border pt-7">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-base font-semibold">
-              {t(shareMode ? 'allocationShares' : 'allocationMembers')}
-            </h3>
-            {shareMode && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!members.length}
-                onClick={() => {
-                  setValues(
-                    Object.fromEntries(
-                      members.map((member, index) => [
-                        member.id,
-                        allocationValue(
-                          Math.floor(10000 / members.length) +
-                            (index < 10000 % members.length ? 1 : 0),
-                          'ratio',
-                        ),
-                      ]),
-                    ),
-                  )
-                  setSelectedMembers(
-                    Object.fromEntries(
-                      members.map((member) => [member.id, true]),
-                    ),
-                  )
-                }}
-              >
-                {t('allocationSplitEqually')}
-              </Button>
-            )}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={members.length > 0 && selectedCount === members.length}
-                disabled={!members.length}
-                onChange={(event) =>
-                  setSelectedMembers(
-                    Object.fromEntries(
-                      members.map((member) => [
-                        member.id,
-                        event.target.checked,
-                      ]),
-                    ),
-                  )
-                }
-                aria-label={t('allocationSelectAllMembers')}
-                className="size-4 accent-primary"
-              />
-              {t('allocationSelectAllMembers')}
-            </label>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {t(
-              mode === 'windows'
-                ? 'allocationWindowBlankHint'
-                : 'allocationBlankHint',
-            )}
-          </p>
-          <div className="divide-y divide-border">
-            {members.map((m) => (
-              <div
-                key={m.id}
-                className={
-                  mode === 'windows'
-                    ? 'space-y-3 py-3'
-                    : 'grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center sm:gap-4'
-                }
-              >
-                {mode === 'windows' ? (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <label className="flex items-center gap-2 text-sm font-medium">
+        {keyMode ? (
+          <KeyShareFields
+            keys={keys}
+            windows={windowRules.map((rule, index) => ({
+              id: rule.id,
+              label: windowLabel(rule, index),
+            }))}
+            selected={selectedKeys}
+            values={keyShares}
+            onSelect={(ids, selected) =>
+              setSelectedKeys((all) => ({
+                ...all,
+                ...Object.fromEntries(ids.map((id) => [id, selected])),
+              }))
+            }
+            onChange={(key, window, value) =>
+              setKeyShares((all) => ({
+                ...all,
+                [key]: { ...(all[key] ?? {}), [window]: value },
+              }))
+            }
+          />
+        ) : (
+          <section className="space-y-4 border-t border-border pt-7">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-base font-semibold">
+                {t(shareMode ? 'allocationShares' : 'allocationMembers')}
+              </h3>
+              {shareMode && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!members.length}
+                  onClick={() => {
+                    setValues(
+                      Object.fromEntries(
+                        members.map((member, index) => [
+                          member.id,
+                          allocationValue(
+                            Math.floor(10000 / members.length) +
+                              (index < 10000 % members.length ? 1 : 0),
+                            'ratio',
+                          ),
+                        ]),
+                      ),
+                    )
+                    setSelectedMembers(
+                      Object.fromEntries(
+                        members.map((member) => [member.id, true]),
+                      ),
+                    )
+                  }}
+                >
+                  {t('allocationSplitEqually')}
+                </Button>
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={
+                    members.length > 0 && selectedCount === members.length
+                  }
+                  disabled={!members.length}
+                  onChange={(event) =>
+                    setSelectedMembers(
+                      Object.fromEntries(
+                        members.map((member) => [
+                          member.id,
+                          event.target.checked,
+                        ]),
+                      ),
+                    )
+                  }
+                  aria-label={t('allocationSelectAllMembers')}
+                  className="size-4 accent-primary"
+                />
+                {t('allocationSelectAllMembers')}
+              </label>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {t(
+                mode === 'windows'
+                  ? 'allocationWindowBlankHint'
+                  : 'allocationBlankHint',
+              )}
+            </p>
+            <div className="divide-y divide-border">
+              {members.map((m) => (
+                <div
+                  key={m.id}
+                  className={
+                    mode === 'windows'
+                      ? 'space-y-3 py-3'
+                      : 'grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center sm:gap-4'
+                  }
+                >
+                  {mode === 'windows' ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <input
+                            type="checkbox"
+                            checked={!!selectedMembers[m.id]}
+                            onChange={(e) =>
+                              setSelectedMembers((all) => ({
+                                ...all,
+                                [m.id]: e.target.checked,
+                              }))
+                            }
+                            aria-label={t('allocationIncludeMember', {
+                              name: m.username,
+                            })}
+                            className="size-4 accent-primary"
+                          />
+                          <span className="min-w-0 break-words">
+                            {m.username}
+                          </span>
+                        </label>
+                        {selectedMembers[m.id] && (
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={!!memberCustomization[m.id]}
+                              onChange={(e) =>
+                                setMemberCustomization((all) => ({
+                                  ...all,
+                                  [m.id]: e.target.checked,
+                                }))
+                              }
+                              aria-label={t('allocationOverrideMember', {
+                                name: m.username,
+                              })}
+                              className="size-4 accent-primary"
+                            />
+                            {t('allocationOverrideLimits')}
+                          </label>
+                        )}
+                      </div>
+                      {selectedMembers[m.id] && memberCustomization[m.id] && (
+                        <div className="divide-y divide-border ps-6">
+                          {windowRules.map((rule, index) => {
+                            const duration =
+                              durationSeconds(rule) === null
+                                ? t('allocationCondition', { index: index + 1 })
+                                : t(
+                                    rule.unit === 'days'
+                                      ? 'allocationDurationDays'
+                                      : 'allocationDurationHours',
+                                    { value: rule.duration },
+                                  )
+                            const value = windowOverrideValues[m.id]?.[rule.id]
+                            return (
+                              <div
+                                key={rule.id}
+                                className="grid gap-2 py-2 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
+                              >
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={value !== undefined}
+                                    onChange={(event) =>
+                                      setWindowOverrideValues((all) => {
+                                        const personal = {
+                                          ...(all[m.id] ?? {}),
+                                        }
+                                        if (event.target.checked)
+                                          personal[rule.id] = ''
+                                        else delete personal[rule.id]
+                                        return { ...all, [m.id]: personal }
+                                      })
+                                    }
+                                    aria-label={t('allocationOverrideWindow', {
+                                      duration,
+                                      name: m.username,
+                                    })}
+                                    className="size-4 accent-primary"
+                                  />
+                                  {duration}
+                                </label>
+                                {value !== undefined && (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      aria-label={t('allocationWindowFor', {
+                                        duration,
+                                        name: m.username,
+                                      })}
+                                      value={value}
+                                      onChange={(event) =>
+                                        setWindowOverrideValues((all) => ({
+                                          ...all,
+                                          [m.id]: {
+                                            ...(all[m.id] ?? {}),
+                                            [rule.id]: event.target.value,
+                                          },
+                                        }))
+                                      }
+                                      placeholder={t('allocationUnlimited')}
+                                      inputMode="decimal"
+                                      className="min-w-0 text-right tabular-nums"
+                                    />
+                                    <span className="text-sm text-muted-foreground">
+                                      USD
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <label className="flex min-w-0 items-center gap-2 text-sm">
                         <input
                           type="checkbox"
                           checked={!!selectedMembers[m.id]}
-                          onChange={(e) =>
+                          onChange={(event) =>
                             setSelectedMembers((all) => ({
                               ...all,
-                              [m.id]: e.target.checked,
+                              [m.id]: event.target.checked,
                             }))
                           }
                           aria-label={t('allocationIncludeMember', {
@@ -817,180 +1042,77 @@ export function SchemeForm({
                           })}
                           className="size-4 accent-primary"
                         />
-                        <span className="min-w-0 break-words">
-                          {m.username}
-                        </span>
+                        <span className="break-words">{m.username}</span>
                       </label>
-                      {selectedMembers[m.id] && (
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={!!memberCustomization[m.id]}
-                            onChange={(e) =>
-                              setMemberCustomization((all) => ({
+                      <div className="flex w-full items-center gap-2 sm:w-48">
+                        <Input
+                          id={`share-${m.id}`}
+                          aria-label={t('allocationFor', { name: m.username })}
+                          value={values[m.id] ?? ''}
+                          onChange={(e) => {
+                            setValues((v) => ({ ...v, [m.id]: e.target.value }))
+                            if (e.target.value.trim()) {
+                              setSelectedMembers((all) => ({
                                 ...all,
-                                [m.id]: e.target.checked,
+                                [m.id]: true,
                               }))
                             }
-                            aria-label={t('allocationOverrideMember', {
-                              name: m.username,
-                            })}
-                            className="size-4 accent-primary"
-                          />
-                          {t('allocationOverrideLimits')}
-                        </label>
-                      )}
-                    </div>
-                    {selectedMembers[m.id] && memberCustomization[m.id] && (
-                      <div className="divide-y divide-border ps-6">
-                        {windowRules.map((rule, index) => {
-                          const duration =
-                            durationSeconds(rule) === null
-                              ? t('allocationCondition', { index: index + 1 })
-                              : t(
-                                  rule.unit === 'days'
-                                    ? 'allocationDurationDays'
-                                    : 'allocationDurationHours',
-                                  { value: rule.duration },
-                                )
-                          const value = windowOverrideValues[m.id]?.[rule.id]
-                          return (
-                            <div
-                              key={rule.id}
-                              className="grid gap-2 py-2 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
-                            >
-                              <label className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={value !== undefined}
-                                  onChange={(event) =>
-                                    setWindowOverrideValues((all) => {
-                                      const personal = { ...(all[m.id] ?? {}) }
-                                      if (event.target.checked)
-                                        personal[rule.id] = ''
-                                      else delete personal[rule.id]
-                                      return { ...all, [m.id]: personal }
-                                    })
-                                  }
-                                  aria-label={t('allocationOverrideWindow', {
-                                    duration,
-                                    name: m.username,
-                                  })}
-                                  className="size-4 accent-primary"
-                                />
-                                {duration}
-                              </label>
-                              {value !== undefined && (
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    aria-label={t('allocationWindowFor', {
-                                      duration,
-                                      name: m.username,
-                                    })}
-                                    value={value}
-                                    onChange={(event) =>
-                                      setWindowOverrideValues((all) => ({
-                                        ...all,
-                                        [m.id]: {
-                                          ...(all[m.id] ?? {}),
-                                          [rule.id]: event.target.value,
-                                        },
-                                      }))
-                                    }
-                                    placeholder={t('allocationUnlimited')}
-                                    inputMode="decimal"
-                                    className="min-w-0 text-right tabular-nums"
-                                  />
-                                  <span className="text-sm text-muted-foreground">
-                                    USD
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
+                          }}
+                          inputMode="decimal"
+                          className="w-full text-right tabular-nums"
+                        />
+                        <span className="w-9 text-sm text-muted-foreground">
+                          {shareMode ? '%' : mode === 'amount' ? 'USD' : 'M'}
+                        </span>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <label className="flex min-w-0 items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!!selectedMembers[m.id]}
-                        onChange={(event) =>
-                          setSelectedMembers((all) => ({
-                            ...all,
-                            [m.id]: event.target.checked,
-                          }))
-                        }
-                        aria-label={t('allocationIncludeMember', {
-                          name: m.username,
-                        })}
-                        className="size-4 accent-primary"
-                      />
-                      <span className="break-words">{m.username}</span>
-                    </label>
-                    <div className="flex w-full items-center gap-2 sm:w-48">
-                      <Input
-                        id={`share-${m.id}`}
-                        aria-label={t('allocationFor', { name: m.username })}
-                        value={values[m.id] ?? ''}
-                        onChange={(e) => {
-                          setValues((v) => ({ ...v, [m.id]: e.target.value }))
-                          if (e.target.value.trim()) {
-                            setSelectedMembers((all) => ({
-                              ...all,
-                              [m.id]: true,
-                            }))
-                          }
-                        }}
-                        inputMode="decimal"
-                        className="w-full text-right tabular-nums"
-                      />
-                      <span className="w-9 text-sm text-muted-foreground">
-                        {shareMode ? '%' : mode === 'amount' ? 'USD' : 'M'}
-                      </span>
-                    </div>
-                  </>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            {shareMode && (
+              <p
+                className={
+                  total > 10000
+                    ? 'text-sm text-error'
+                    : 'text-sm text-muted-foreground'
+                }
+              >
+                {t('allocationTotal', {
+                  total: allocationValue(total, 'ratio'),
+                  remaining: allocationValue(
+                    Math.max(0, 10000 - total),
+                    'ratio',
+                  ),
+                })}
+              </p>
+            )}
+            {shareMode && (
+              <p className="text-sm leading-6 text-muted-foreground">
+                {t(
+                  ratioUnit === 'amount'
+                    ? 'allocationRatioAmountRule'
+                    : 'allocationRatioTokenRule',
                 )}
-              </div>
-            ))}
-          </div>
-          {shareMode && (
-            <p
-              className={
-                total > 10000
-                  ? 'text-sm text-error'
-                  : 'text-sm text-muted-foreground'
-              }
-            >
-              {t('allocationTotal', {
-                total: allocationValue(total, 'ratio'),
-                remaining: allocationValue(Math.max(0, 10000 - total), 'ratio'),
-              })}
-            </p>
-          )}
-          {shareMode && (
-            <p className="text-sm leading-6 text-muted-foreground">
-              {t(
-                ratioUnit === 'amount'
-                  ? 'allocationRatioAmountRule'
-                  : 'allocationRatioTokenRule',
-              )}
-            </p>
-          )}
-        </section>
+              </p>
+            )}
+          </section>
+        )}
         <section className="space-y-4 border-t border-border pt-7">
           <h3 className="text-base font-semibold">
             {t('allocationSectionActivation')}
           </h3>
-          {scheme && (
+          {keyMode && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {t('allocationKeysImmediate')}
+            </p>
+          )}
+          {scheme && !keyMode && (
             <p className="text-sm leading-6 text-muted-foreground">
               {t('allocationNextHint')}
             </p>
           )}
-          {effectivePreviewDate && (
+          {effectivePreviewDate && !keyMode && (
             <p role="status" className="text-sm leading-6 text-warning">
               {t(
                 scheme
@@ -1010,7 +1132,7 @@ export function SchemeForm({
               />
               {t('allocationEnabled')}
             </label>
-            {!scheme && (
+            {!scheme && !keyMode && (
               <label className="flex items-start gap-2 text-sm leading-6">
                 <input
                   type="checkbox"
@@ -1021,7 +1143,7 @@ export function SchemeForm({
                 {t('allocationStartNext')}
               </label>
             )}
-            {scheme && (
+            {scheme && !keyMode && (
               <label className="flex items-start gap-2 text-sm leading-6">
                 <input
                   type="checkbox"
@@ -1032,17 +1154,17 @@ export function SchemeForm({
                 {t('allocationApplyNow')}
               </label>
             )}
-            {!scheme && !startNext && (
+            {!scheme && !startNext && !keyMode && (
               <p className="text-sm leading-6 text-muted-foreground">
                 {t('allocationImmediateHint')}
               </p>
             )}
-            {scheme && applyNow && (
+            {scheme && applyNow && !keyMode && (
               <p className="text-sm leading-6 text-yellow-600 dark:text-yellow-500">
                 ⚠️ {t('allocationApplyNowWarning')}
               </p>
             )}
-            {scheme && !applyNow && (
+            {scheme && !applyNow && !keyMode && (
               <p className="text-sm leading-6 text-muted-foreground">
                 {t('allocationScheduledHint')}
               </p>

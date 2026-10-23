@@ -227,7 +227,7 @@ func TestChangingZoneKeepsCurrentPeriodUsage(t *testing.T) {
 	}
 	s.SetLocation(func() *time.Location { return shanghai })
 	s.now = func() time.Time { return time.Unix(started+3600, 0) }
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", started+3600, shanghai); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", started+3600, shanghai); !errors.Is(err, ErrQuota) {
 		t.Fatal("usage escaped when zone changed", err)
 	}
 	detail, err := s.Detail(ctx, scheme.ID, user)
@@ -331,12 +331,12 @@ func TestRatioTokenBudgetChargesReportedTokensWithoutQuotaSnapshot(t *testing.T)
 	if err := Finish(ctx, q, request.ID, Completion{Input: 40_000, Known: true, Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("member exceeded percentage of total token budget", err)
 	}
 	now = time.Date(2030, 5, 1, 0, 0, 0, 0, time.UTC).Unix()
 	request.StartedAt = now
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("new month did not reset token share", err)
 	}
 	request.ID = "synthetic-unknown-tokens"
@@ -346,7 +346,7 @@ func TestRatioTokenBudgetChargesReportedTokensWithoutQuotaSnapshot(t *testing.T)
 	if err := Finish(ctx, q, request.ID, Completion{Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("one unknown report interrupted the member", err)
 	}
 	request.ID = "synthetic-unknown-tokens-two"
@@ -356,11 +356,11 @@ func TestRatioTokenBudgetChargesReportedTokensWithoutQuotaSnapshot(t *testing.T)
 	if err := Finish(ctx, q, request.ID, Completion{Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("two unknown requests exhausted a still-usable allowance", err)
 	}
 	now = time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC).Unix()
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("previous cycle pending entries froze the new cycle", err)
 	}
 }
@@ -409,7 +409,7 @@ func TestRatioAmountBudgetUsesSavedModelPrices(t *testing.T) {
 	if err != nil || len(detail.Balances) != 1 || detail.Balances[0].Mode != "amount" || detail.Balances[0].Limit != 1_000_000 || detail.Balances[0].Used != 1_000_000 {
 		t.Fatal("amount share was not charged at the saved model price", detail, err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("member exceeded monetary percentage", err)
 	}
 }
@@ -1004,10 +1004,10 @@ func TestAccountingIsolationPendingRecoveryAndRollover(t *testing.T) {
 	if err = Finish(ctx, q, r.ID, Completion{Input: 3, Output: 2, Known: true, Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err = Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("exhausted allowance admitted", err)
 	}
-	if _, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now+86400, time.UTC); err != nil {
+	if _, err = Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now+86400, time.UTC); err != nil {
 		t.Fatal("daily reset", err)
 	}
 	now += 86400
@@ -1025,7 +1025,7 @@ func TestAccountingIsolationPendingRecoveryAndRollover(t *testing.T) {
 		t.Fatal("current-cycle pending exposure was not reported", balance)
 	}
 	now += 86400
-	if _, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC); err != nil {
+	if _, err = Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now, time.UTC); err != nil {
 		t.Fatal("previous cycle debt froze the new cycle", err)
 	}
 	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil || len(detail.Pending) != 1 {
@@ -1039,7 +1039,7 @@ func TestAccountingIsolationPendingRecoveryAndRollover(t *testing.T) {
 	if err = s.Settle(ctx, scheme.ID, r.ID, Completion{Input: 3, Output: 2}); err != nil {
 		t.Fatal("settlement retry", err)
 	}
-	if _, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now+172800, time.UTC); err != nil {
+	if _, err = Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now+172800, time.UTC); err != nil {
 		t.Fatal("charged next period", err)
 	}
 }
@@ -1065,7 +1065,7 @@ func TestInFlightRequestsReserveRiskWithoutEarlyQuotaExhaustion(t *testing.T) {
 	if err := Begin(ctx, q, r, now, time.UTC); err != nil {
 		t.Fatal("first in-flight request should fit the risk buffer", err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC); !errors.Is(err, ErrRisk) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now, time.UTC); !errors.Is(err, ErrRisk) {
 		t.Fatal("second request exceeded the reserved risk buffer", err)
 	}
 	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil {
@@ -1076,7 +1076,7 @@ func TestInFlightRequestsReserveRiskWithoutEarlyQuotaExhaustion(t *testing.T) {
 	if err := Finish(ctx, q, r.ID, Completion{Input: 2, Known: true, Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now, time.UTC); err != nil {
 		t.Fatal("reservation was not released", err)
 	}
 	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil {
@@ -1102,7 +1102,7 @@ func TestUnsettledRequestCountHasAutomaticBound(t *testing.T) {
 			t.Fatal(i, err)
 		}
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrRisk) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrRisk) {
 		t.Fatal("fifth unsettled request was allowed", err)
 	}
 	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil {
@@ -1132,7 +1132,7 @@ func TestPendingUsageDoesNotReserveAdmissionAfterRequestEnds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("finished requests with unknown usage blocked admission", err)
 	}
 	detail, err := s.Detail(ctx, scheme.ID, user)
@@ -1163,7 +1163,7 @@ func TestPartialPendingUsageDoesNotChargeUntilConfirmed(t *testing.T) {
 	}
 	assertPendingDoesNotCharge := func() {
 		t.Helper()
-		if _, err := Check(ctx, q, scheme.ID, user, 2, account, request.Model, now, time.UTC); err != nil {
+		if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, request.Model, now, time.UTC); err != nil {
 			t.Fatal("partial pending usage blocked admission", err)
 		}
 		detail, err := s.Detail(ctx, scheme.ID, user)
@@ -1180,7 +1180,7 @@ func TestPartialPendingUsageDoesNotChargeUntilConfirmed(t *testing.T) {
 	if err := s.Settle(ctx, scheme.ID, request.ID, Completion{Input: 5}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, request.Model, now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, request.Model, now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("confirmed usage was not charged", err)
 	}
 }
@@ -1213,19 +1213,19 @@ func TestWindowedAmountChecksFiveHoursAndSevenDays(t *testing.T) {
 		t.Fatal("dual balances do not share one settled request", detail.Balances)
 	}
 	charge("synthetic-5h-last", 10)
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("five-hour amount limit was exceeded", err)
 	}
 	now += 5 * 3600
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("five-hour reset did not reopen the weekly allowance", err)
 	}
 	charge("synthetic-7d-last", 100)
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("seven-day amount limit was exceeded", err)
 	}
 	now += 7*86400 - 5*3600
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("seven-day reset did not reopen the allowance", err)
 	}
 }
@@ -1323,7 +1323,7 @@ func TestWindowedAmountPendingExposureFollowsEachWindow(t *testing.T) {
 	if detail.Balances[0].PendingCurrent != 0 || detail.Balances[0].Reserved != 0 || detail.Balances[1].PendingCurrent != 1 || detail.Balances[1].Reserved != 0 {
 		t.Fatal("weekly pending usage reserved capacity or disappeared", detail.Balances)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("one weekly pending request froze both windows", err)
 	}
 }
@@ -1382,7 +1382,7 @@ func TestWindowedAmountAllowsEachLimitToBeUnlimited(t *testing.T) {
 			if err := Finish(ctx, q, r.ID, Completion{Input: 250, Known: true, Dispatched: true}, now*1000, false); err != nil {
 				t.Fatal(err)
 			}
-			_, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC)
+			_, err = Check(ctx, q, scheme.ID, user, 0, 2, account, r.Model, now, time.UTC)
 			if tc.wantAdmission == nil && err != nil || tc.wantAdmission != nil && !errors.Is(err, tc.wantAdmission) {
 				t.Fatal("wrong unlimited admission", err)
 			}
@@ -1434,10 +1434,10 @@ func TestWindowedSharedDefaultsAndMemberOverrideKeepSeparateLedgers(t *testing.T
 	if err := Finish(ctx, q, first.ID, Completion{Input: 100, Known: true, Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("first member did not inherit five-hour limit", err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, second.ID, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, second.ID, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("one member's usage blocked another inherited ledger", err)
 	}
 	secondDetail, err := s.Detail(ctx, scheme.ID, second.ID)
@@ -1493,19 +1493,19 @@ func TestDynamicWindowConditionsUseEachCustomDuration(t *testing.T) {
 	if err != nil || len(detail.Balances) != 2 || detail.Balances[0].WindowSeconds != 2*3600 || detail.Balances[0].Used != 100 || detail.Balances[1].WindowSeconds != 3*86400 || detail.Balances[1].Used != 100 {
 		t.Fatal("custom windows did not count the same request", detail.Balances, err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("short custom window did not enforce its limit", err)
 	}
 	now = start + 2*3600
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("short custom window did not renew", err)
 	}
 	charge("synthetic-custom-second", 100)
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
 		t.Fatal("long custom window did not enforce its limit", err)
 	}
 	now = start + 3*86400
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("long custom window did not renew", err)
 	}
 }
@@ -1740,7 +1740,7 @@ func TestUnpricedHiddenModelsAreFreeButVisibleModelsStayRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := db.New(conn)
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic-unpriced", now, time.UTC); !errors.Is(err, ErrUnpriced) {
+	if _, err := Check(ctx, q, scheme.ID, user, 0, 2, account, "synthetic-unpriced", now, time.UTC); !errors.Is(err, ErrUnpriced) {
 		t.Fatal("unpriced visible model was admitted", err)
 	}
 	request := Request{ID: "synthetic-hidden", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic-internal", StartedAt: now}
@@ -1753,5 +1753,141 @@ func TestUnpricedHiddenModelsAreFreeButVisibleModelsStayRejected(t *testing.T) {
 	detail, err := s.Detail(ctx, scheme.ID, user)
 	if err != nil || len(detail.Balances) != 1 || detail.Balances[0].Used != 0 {
 		t.Fatal("hidden model consumed the allowance", detail, err)
+	}
+}
+
+type keyShareCase struct {
+	t       *testing.T
+	s       *Service
+	q       *db.Queries
+	user    int64
+	account string
+	keys    []int64
+	scheme  int64
+	now     int64
+	serial  int
+}
+
+func newKeyShareCase(t *testing.T) *keyShareCase {
+	t.Helper()
+	s, conn, user, account := fixture(t)
+	c := &keyShareCase{t: t, s: s, q: db.New(conn), user: user, account: account, now: time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()}
+	s.now = func() time.Time { return unix(c.now) }
+	for range 2 {
+		result, err := conn.ExecContext(context.Background(), "INSERT INTO api_keys(user_id,group_id,name,prefix,token_hash,created_at) VALUES(?,2,'synthetic','sl_fake',randomblob(32),1)", user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		c.keys = append(c.keys, id)
+	}
+	return c
+}
+
+// shares maps each selected key to its per-window shares in window order; every budget is 100.
+func (c *keyShareCase) save(windows []int64, shares map[int64][]int64) {
+	c.t.Helper()
+	config := Config{Mode: "keys", Period: "durations", Keys: []KeyShare{}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}}}
+	for _, seconds := range windows {
+		config.Windows = append(config.Windows, WindowCondition{DurationSeconds: seconds, Limit: 100})
+	}
+	for key, values := range shares {
+		share := KeyShare{KeyID: key}
+		for i, value := range values {
+			share.Shares = append(share.Shares, KeyWindowShare{DurationSeconds: windows[i], Share: value})
+		}
+		config.Keys = append(config.Keys, share)
+	}
+	scheme, err := c.s.SaveScheme(context.Background(), c.scheme, SchemeInput{Name: "Synthetic key shares", GroupID: 2, Enabled: true, Config: config})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	c.scheme = scheme.ID
+}
+
+// charge records one settled request costing 10 micro-USD.
+func (c *keyShareCase) charge(key int64) {
+	c.t.Helper()
+	c.serial++
+	request := Request{ID: fmt.Sprintf("synthetic-key-share-%d", c.serial), SchemeID: c.scheme, UserID: c.user, KeyID: key, GroupID: 2, AccountID: c.account, Model: "synthetic", StartedAt: c.now}
+	if err := Begin(context.Background(), c.q, request, c.now, time.UTC); err != nil {
+		c.t.Fatal(err)
+	}
+	if err := Finish(context.Background(), c.q, request.ID, Completion{Input: 5, Output: 5, Known: true, Dispatched: true}, c.now*1000, false); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
+func (c *keyShareCase) check(key int64) error {
+	_, err := Check(context.Background(), c.q, c.scheme, c.user, key, 2, c.account, "synthetic", c.now, time.UTC)
+	return err
+}
+
+func TestKeyShareWindowTrailsCurrentTime(t *testing.T) {
+	c := newKeyShareCase(t)
+	c.save([]int64{5 * 3600}, map[int64][]int64{c.keys[0]: {2000}})
+	start := c.now
+	c.charge(c.keys[0])
+	c.now += 600
+	c.charge(c.keys[0])
+	c.now += 60
+	var exhausted *KeyWindowError
+	if err := c.check(c.keys[0]); !errors.As(err, &exhausted) || exhausted.WindowSeconds != 5*3600 || exhausted.RetryAfter != start+5*3600-c.now {
+		t.Fatal("expected refusal until the first charge leaves the window", err, exhausted)
+	}
+	c.now = start + 5*3600 - 1
+	if err := c.check(c.keys[0]); !errors.Is(err, ErrKeyWindow) {
+		t.Fatal("first charge left the window early", err)
+	}
+	c.now = start + 5*3600
+	if err := c.check(c.keys[0]); err != nil {
+		t.Fatal("capacity did not return as usage left the trailing window", err)
+	}
+}
+
+func TestKeyShareCountsUsageOnlySinceJoining(t *testing.T) {
+	c := newKeyShareCase(t)
+	c.save([]int64{5 * 3600}, map[int64][]int64{c.keys[0]: {2000}, c.keys[1]: {2000}})
+	c.charge(c.keys[0])
+	c.charge(c.keys[0])
+	c.now += 60
+	c.save([]int64{5 * 3600}, map[int64][]int64{c.keys[1]: {2000}})
+	c.now += 60
+	c.save([]int64{5 * 3600}, map[int64][]int64{c.keys[0]: {2000}, c.keys[1]: {2000}})
+	if err := c.check(c.keys[0]); err != nil {
+		t.Fatal("usage from before the key rejoined still counted", err)
+	}
+}
+
+func TestKeyShareEnforcesEveryWindowWithItsOwnShare(t *testing.T) {
+	c := newKeyShareCase(t)
+	c.save([]int64{5 * 3600, 7 * 86400}, map[int64][]int64{c.keys[0]: {10000, 4000}})
+	for range 4 {
+		c.charge(c.keys[0])
+	}
+	var exhausted *KeyWindowError
+	if err := c.check(c.keys[0]); !errors.As(err, &exhausted) || exhausted.WindowSeconds != 7*86400 {
+		t.Fatal("weekly share did not refuse while the 5-hour share had room", err)
+	}
+}
+
+func TestKeyShareNewWindowCountsOnlyLaterUsage(t *testing.T) {
+	c := newKeyShareCase(t)
+	c.save([]int64{5 * 3600}, map[int64][]int64{c.keys[0]: {10000}})
+	for range 4 {
+		c.charge(c.keys[0])
+	}
+	c.now += 60
+	c.save([]int64{5 * 3600, 7 * 86400}, map[int64][]int64{c.keys[0]: {10000, 4000}})
+	if err := c.check(c.keys[0]); err != nil {
+		t.Fatal("a new window charged usage from before it was added", err)
+	}
+	c.now += 60
+	c.save([]int64{5 * 3600, 7 * 86400}, map[int64][]int64{c.keys[0]: {9000, 4000}})
+	for range 4 {
+		c.charge(c.keys[0])
+	}
+	if err := c.check(c.keys[0]); !errors.Is(err, ErrKeyWindow) {
+		t.Fatal("editing shares reset the weekly window's start", err)
 	}
 }

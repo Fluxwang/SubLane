@@ -139,6 +139,9 @@ func effectiveWindows(rev Revision, now int64, location *time.Location) []alloca
 }
 
 func nextEffective(c Config, now int64, location *time.Location, anchor int64) int64 {
+	if keyMode(c) {
+		return now
+	}
 	if c.Period == "durations" {
 		longest := int64(0)
 		for _, condition := range c.Windows {

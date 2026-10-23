@@ -191,6 +191,9 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	}
 	// Keep this archive on its historical schema so restore exercises newer migrations.
 	if _, err := connection.ExecContext(ctx, `DROP VIEW routable_group_resources;
+DROP INDEX allocation_entries_key;
+ALTER TABLE allocation_entries DROP COLUMN key_id;
+ALTER TABLE allocation_keys DROP COLUMN joined_at;
 DROP TABLE usage_lifetime_keys;
 DROP TABLE usage_daily_keys;
 DELETE FROM settings WHERE key='usage.keys.started_at';

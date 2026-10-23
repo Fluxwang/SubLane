@@ -9,6 +9,8 @@ export const auditActions: Record<string, keyof typeof en> = {
   'allocation.settle': 'auditAllocationSettle',
   'allocation.delete': 'auditAllocationDelete',
   'allocation.reconcile': 'auditAllocationReconcile',
+  'allocation.key_join': 'auditAllocationKeyJoin',
+  'allocation.key_leave': 'auditAllocationKeyLeave',
   'backup.export': 'auditBackupExport',
   'backup.prepare': 'auditBackupPrepare',
   'backup.verify': 'auditBackupVerify',

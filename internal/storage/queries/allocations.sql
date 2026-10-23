@@ -53,9 +53,25 @@ WHERE s.id=? AND access.user_id=? AND s.enabled=1);
 INSERT INTO allocation_keys(key_id,scheme_id) VALUES(?,?);
 -- name: GetKeyAllocation :one
 SELECT scheme_id FROM allocation_keys WHERE key_id=?;
+-- name: GetKeyAllocationBinding :one
+SELECT scheme_id,joined_at FROM allocation_keys WHERE key_id=?;
+-- name: JoinKeyAllocation :exec
+INSERT INTO allocation_keys(key_id,scheme_id,joined_at) VALUES(?,?,?);
+-- name: LeaveKeyAllocation :exec
+DELETE FROM allocation_keys WHERE key_id=? AND scheme_id=?;
+-- name: ListSchemeKeyBindings :many
+SELECT ak.key_id,ak.joined_at,k.name,k.prefix FROM allocation_keys ak JOIN api_keys k ON k.id=ak.key_id
+WHERE ak.scheme_id=? ORDER BY ak.key_id;
+-- name: GetAllocationKeyCandidate :one
+SELECT group_id,revoked_at FROM api_keys WHERE id=?;
+-- name: ListAllocationKeyCandidates :many
+SELECT k.id,k.name,k.prefix,u.username FROM api_keys k JOIN users u ON u.id=k.user_id
+WHERE k.group_id=? AND k.revoked_at IS NULL ORDER BY k.id LIMIT 500;
+-- name: ReplaceAllocationRevision :exec
+UPDATE allocation_revisions SET config=? WHERE scheme_id=? AND effective_at=?;
 -- name: BeginAllocationEntry :exec
-INSERT INTO allocation_entries(request_id,scheme_id,revision_id,user_id,account_id,model,mode,window_start,reset_at,started_at,state)
-VALUES(?,?,?,?,?,?,?,?,?,?,'active');
+INSERT INTO allocation_entries(request_id,scheme_id,revision_id,user_id,key_id,account_id,model,mode,window_start,reset_at,started_at,state)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,'active');
 -- name: GetAllocationEntry :one
 SELECT * FROM allocation_entries WHERE request_id=?;
 -- name: FinishAllocationEntry :exec
@@ -69,6 +85,19 @@ WHERE s.id=allocation_entries.scheme_id AND g.tenant_id=sqlc.arg(tenant_id));
 SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
 FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND user_id=sqlc.arg(user_id)
 AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND mode=sqlc.arg(mode) AND state='settled';
+-- name: AllocationKeyUsage :one
+SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
+FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND key_id=sqlc.arg(key_id)
+AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND state='settled';
+-- name: AllocationKeyExposure :one
+SELECT CAST(COALESCE(SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),0) AS INTEGER) AS active,
+CAST(COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS INTEGER) AS pending
+FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND key_id=sqlc.arg(key_id)
+AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND state IN ('active','pending');
+-- name: ListAllocationKeyCharges :many
+SELECT started_at,cost FROM allocation_entries
+WHERE scheme_id=sqlc.arg(scheme_id) AND key_id=sqlc.arg(key_id) AND started_at>=sqlc.arg(started_from)
+AND started_at<sqlc.arg(started_to) AND state='settled' AND cost>0 ORDER BY started_at,request_id LIMIT 4096;
 -- name: AllocationMemberPending :one
 SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND user_id=? AND state='pending';
 -- name: AllocationMemberExposure :one

@@ -20,6 +20,67 @@ func (q *Queries) AccountHasAllocation(ctx context.Context, accountID string) (b
 	return exists, err
 }
 
+const allocationKeyExposure = `-- name: AllocationKeyExposure :one
+SELECT CAST(COALESCE(SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),0) AS INTEGER) AS active,
+CAST(COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS INTEGER) AS pending
+FROM allocation_entries WHERE scheme_id=?1 AND key_id=?2
+AND started_at>=?3 AND started_at<?4 AND state IN ('active','pending')
+`
+
+type AllocationKeyExposureParams struct {
+	SchemeID    int64
+	KeyID       int64
+	StartedFrom int64
+	StartedTo   int64
+}
+
+type AllocationKeyExposureRow struct {
+	Active  int64
+	Pending int64
+}
+
+func (q *Queries) AllocationKeyExposure(ctx context.Context, arg AllocationKeyExposureParams) (AllocationKeyExposureRow, error) {
+	row := q.db.QueryRowContext(ctx, allocationKeyExposure,
+		arg.SchemeID,
+		arg.KeyID,
+		arg.StartedFrom,
+		arg.StartedTo,
+	)
+	var i AllocationKeyExposureRow
+	err := row.Scan(&i.Active, &i.Pending)
+	return i, err
+}
+
+const allocationKeyUsage = `-- name: AllocationKeyUsage :one
+SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
+FROM allocation_entries WHERE scheme_id=?1 AND key_id=?2
+AND started_at>=?3 AND started_at<?4 AND state='settled'
+`
+
+type AllocationKeyUsageParams struct {
+	SchemeID    int64
+	KeyID       int64
+	StartedFrom int64
+	StartedTo   int64
+}
+
+type AllocationKeyUsageRow struct {
+	Used   int64
+	Tokens int64
+}
+
+func (q *Queries) AllocationKeyUsage(ctx context.Context, arg AllocationKeyUsageParams) (AllocationKeyUsageRow, error) {
+	row := q.db.QueryRowContext(ctx, allocationKeyUsage,
+		arg.SchemeID,
+		arg.KeyID,
+		arg.StartedFrom,
+		arg.StartedTo,
+	)
+	var i AllocationKeyUsageRow
+	err := row.Scan(&i.Used, &i.Tokens)
+	return i, err
+}
+
 const allocationMemberExposure = `-- name: AllocationMemberExposure :one
 SELECT CAST(COALESCE(SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),0) AS INTEGER) AS active,
 CAST(COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS INTEGER) AS pending
@@ -144,8 +205,8 @@ func (q *Queries) AllocationPoolAccounts(ctx context.Context, groupID int64) ([]
 }
 
 const beginAllocationEntry = `-- name: BeginAllocationEntry :exec
-INSERT INTO allocation_entries(request_id,scheme_id,revision_id,user_id,account_id,model,mode,window_start,reset_at,started_at,state)
-VALUES(?,?,?,?,?,?,?,?,?,?,'active')
+INSERT INTO allocation_entries(request_id,scheme_id,revision_id,user_id,key_id,account_id,model,mode,window_start,reset_at,started_at,state)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,'active')
 `
 
 type BeginAllocationEntryParams struct {
@@ -153,6 +214,7 @@ type BeginAllocationEntryParams struct {
 	SchemeID    int64
 	RevisionID  int64
 	UserID      int64
+	KeyID       int64
 	AccountID   string
 	Model       string
 	Mode        string
@@ -167,6 +229,7 @@ func (q *Queries) BeginAllocationEntry(ctx context.Context, arg BeginAllocationE
 		arg.SchemeID,
 		arg.RevisionID,
 		arg.UserID,
+		arg.KeyID,
 		arg.AccountID,
 		arg.Model,
 		arg.Mode,
@@ -336,7 +399,7 @@ func (q *Queries) FinishAllocationEntry(ctx context.Context, arg FinishAllocatio
 }
 
 const getAllocationEntry = `-- name: GetAllocationEntry :one
-SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual FROM allocation_entries WHERE request_id=?
+SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual, key_id FROM allocation_entries WHERE request_id=?
 `
 
 func (q *Queries) GetAllocationEntry(ctx context.Context, requestID string) (AllocationEntry, error) {
@@ -360,7 +423,24 @@ func (q *Queries) GetAllocationEntry(ctx context.Context, requestID string) (All
 		&i.CachedTokens,
 		&i.Cost,
 		&i.Manual,
+		&i.KeyID,
 	)
+	return i, err
+}
+
+const getAllocationKeyCandidate = `-- name: GetAllocationKeyCandidate :one
+SELECT group_id,revoked_at FROM api_keys WHERE id=?
+`
+
+type GetAllocationKeyCandidateRow struct {
+	GroupID   int64
+	RevokedAt *int64
+}
+
+func (q *Queries) GetAllocationKeyCandidate(ctx context.Context, id int64) (GetAllocationKeyCandidateRow, error) {
+	row := q.db.QueryRowContext(ctx, getAllocationKeyCandidate, id)
+	var i GetAllocationKeyCandidateRow
+	err := row.Scan(&i.GroupID, &i.RevokedAt)
 	return i, err
 }
 
@@ -419,6 +499,22 @@ func (q *Queries) GetKeyAllocation(ctx context.Context, keyID int64) (int64, err
 	return scheme_id, err
 }
 
+const getKeyAllocationBinding = `-- name: GetKeyAllocationBinding :one
+SELECT scheme_id,joined_at FROM allocation_keys WHERE key_id=?
+`
+
+type GetKeyAllocationBindingRow struct {
+	SchemeID int64
+	JoinedAt int64
+}
+
+func (q *Queries) GetKeyAllocationBinding(ctx context.Context, keyID int64) (GetKeyAllocationBindingRow, error) {
+	row := q.db.QueryRowContext(ctx, getKeyAllocationBinding, keyID)
+	var i GetKeyAllocationBindingRow
+	err := row.Scan(&i.SchemeID, &i.JoinedAt)
+	return i, err
+}
+
 const getPoolAllocation = `-- name: GetPoolAllocation :one
 SELECT id FROM allocation_schemes WHERE group_id=?
 `
@@ -463,8 +559,123 @@ func (q *Queries) GetTenantAllocationScheme(ctx context.Context, arg GetTenantAl
 	return i, err
 }
 
+const joinKeyAllocation = `-- name: JoinKeyAllocation :exec
+INSERT INTO allocation_keys(key_id,scheme_id,joined_at) VALUES(?,?,?)
+`
+
+type JoinKeyAllocationParams struct {
+	KeyID    int64
+	SchemeID int64
+	JoinedAt int64
+}
+
+func (q *Queries) JoinKeyAllocation(ctx context.Context, arg JoinKeyAllocationParams) error {
+	_, err := q.db.ExecContext(ctx, joinKeyAllocation, arg.KeyID, arg.SchemeID, arg.JoinedAt)
+	return err
+}
+
+const leaveKeyAllocation = `-- name: LeaveKeyAllocation :exec
+DELETE FROM allocation_keys WHERE key_id=? AND scheme_id=?
+`
+
+type LeaveKeyAllocationParams struct {
+	KeyID    int64
+	SchemeID int64
+}
+
+func (q *Queries) LeaveKeyAllocation(ctx context.Context, arg LeaveKeyAllocationParams) error {
+	_, err := q.db.ExecContext(ctx, leaveKeyAllocation, arg.KeyID, arg.SchemeID)
+	return err
+}
+
+const listAllocationKeyCandidates = `-- name: ListAllocationKeyCandidates :many
+SELECT k.id,k.name,k.prefix,u.username FROM api_keys k JOIN users u ON u.id=k.user_id
+WHERE k.group_id=? AND k.revoked_at IS NULL ORDER BY k.id LIMIT 500
+`
+
+type ListAllocationKeyCandidatesRow struct {
+	ID       int64
+	Name     string
+	Prefix   string
+	Username string
+}
+
+func (q *Queries) ListAllocationKeyCandidates(ctx context.Context, groupID int64) ([]ListAllocationKeyCandidatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationKeyCandidates, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationKeyCandidatesRow{}
+	for rows.Next() {
+		var i ListAllocationKeyCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Prefix,
+			&i.Username,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationKeyCharges = `-- name: ListAllocationKeyCharges :many
+SELECT started_at,cost FROM allocation_entries
+WHERE scheme_id=?1 AND key_id=?2 AND started_at>=?3
+AND started_at<?4 AND state='settled' AND cost>0 ORDER BY started_at,request_id LIMIT 4096
+`
+
+type ListAllocationKeyChargesParams struct {
+	SchemeID    int64
+	KeyID       int64
+	StartedFrom int64
+	StartedTo   int64
+}
+
+type ListAllocationKeyChargesRow struct {
+	StartedAt int64
+	Cost      int64
+}
+
+func (q *Queries) ListAllocationKeyCharges(ctx context.Context, arg ListAllocationKeyChargesParams) ([]ListAllocationKeyChargesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationKeyCharges,
+		arg.SchemeID,
+		arg.KeyID,
+		arg.StartedFrom,
+		arg.StartedTo,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationKeyChargesRow{}
+	for rows.Next() {
+		var i ListAllocationKeyChargesRow
+		if err := rows.Scan(&i.StartedAt, &i.Cost); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllocationPending = `-- name: ListAllocationPending :many
-SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual FROM allocation_entries WHERE scheme_id=?1 AND (?2=0 OR user_id=?2) AND state='pending' ORDER BY started_at DESC,request_id DESC LIMIT 256
+SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual, key_id FROM allocation_entries WHERE scheme_id=?1 AND (?2=0 OR user_id=?2) AND state='pending' ORDER BY started_at DESC,request_id DESC LIMIT 256
 `
 
 type ListAllocationPendingParams struct {
@@ -499,6 +710,7 @@ func (q *Queries) ListAllocationPending(ctx context.Context, arg ListAllocationP
 			&i.CachedTokens,
 			&i.Cost,
 			&i.Manual,
+			&i.KeyID,
 		); err != nil {
 			return nil, err
 		}
@@ -666,6 +878,46 @@ func (q *Queries) ListAllocationSchemes(ctx context.Context, tenantID int64) ([]
 	return items, nil
 }
 
+const listSchemeKeyBindings = `-- name: ListSchemeKeyBindings :many
+SELECT ak.key_id,ak.joined_at,k.name,k.prefix FROM allocation_keys ak JOIN api_keys k ON k.id=ak.key_id
+WHERE ak.scheme_id=? ORDER BY ak.key_id
+`
+
+type ListSchemeKeyBindingsRow struct {
+	KeyID    int64
+	JoinedAt int64
+	Name     string
+	Prefix   string
+}
+
+func (q *Queries) ListSchemeKeyBindings(ctx context.Context, schemeID int64) ([]ListSchemeKeyBindingsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSchemeKeyBindings, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSchemeKeyBindingsRow{}
+	for rows.Next() {
+		var i ListSchemeKeyBindingsRow
+		if err := rows.Scan(
+			&i.KeyID,
+			&i.JoinedAt,
+			&i.Name,
+			&i.Prefix,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextAllocationRevision = `-- name: NextAllocationRevision :one
 SELECT id, scheme_id, effective_at, config FROM allocation_revisions WHERE scheme_id=? AND effective_at>? ORDER BY effective_at LIMIT 1
 `
@@ -709,6 +961,21 @@ WHERE s.id=allocation_entries.scheme_id AND g.tenant_id=?1)
 
 func (q *Queries) RecoverAllocationEntries(ctx context.Context, tenantID int64) error {
 	_, err := q.db.ExecContext(ctx, recoverAllocationEntries, tenantID)
+	return err
+}
+
+const replaceAllocationRevision = `-- name: ReplaceAllocationRevision :exec
+UPDATE allocation_revisions SET config=? WHERE scheme_id=? AND effective_at=?
+`
+
+type ReplaceAllocationRevisionParams struct {
+	Config      string
+	SchemeID    int64
+	EffectiveAt int64
+}
+
+func (q *Queries) ReplaceAllocationRevision(ctx context.Context, arg ReplaceAllocationRevisionParams) error {
+	_, err := q.db.ExecContext(ctx, replaceAllocationRevision, arg.Config, arg.SchemeID, arg.EffectiveAt)
 	return err
 }
 

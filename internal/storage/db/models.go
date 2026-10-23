@@ -68,6 +68,7 @@ type AllocationEntry struct {
 	CachedTokens int64
 	Cost         int64
 	Manual       int64
+	KeyID        int64
 }
 
 type AllocationRevision struct {

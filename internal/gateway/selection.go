@@ -16,9 +16,9 @@ import (
 
 // Called under s.mu by Open, keeping policy, selection and account reservation atomic.
 func (s *Service) selectAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind) (string, [32]byte, error) {
-	return s.selectAllocationAccount(ctx, userID, groupID, session, provider, model, kind, 0, pinnedAffinity)
+	return s.selectAllocationAccount(ctx, userID, groupID, session, provider, model, kind, 0, 0, pinnedAffinity)
 }
-func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind, scheme int64, affinity affinityMode) (string, [32]byte, error) {
+func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID int64, session, provider, model string, kind Kind, scheme, key int64, affinity affinityMode) (string, [32]byte, error) {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", userID, session)))
 	// Preserve upstream session/cache IDs for existing conversations in the former default pool, even after it is renamed.
 	if groupID != groups.LegacyID {
@@ -156,7 +156,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 					return id, digest, err
 				}
 				if scheme != 0 {
-					if _, err := allocations.Check(ctx, q, scheme, userID, groupID, id, model, now, s.location()); err != nil {
+					if _, err := allocations.Check(ctx, q, scheme, userID, key, groupID, id, model, now, s.location()); err != nil {
 						return id, digest, err
 					}
 				}
@@ -243,8 +243,8 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			return "", digest, err
 		}
 		if scheme != 0 {
-			if _, err := allocations.Check(ctx, q, scheme, userID, groupID, account.ID, model, now, s.location()); err != nil {
-				if !errors.Is(err, allocations.ErrQuota) && !errors.Is(err, allocations.ErrPending) && !errors.Is(err, allocations.ErrRisk) && !errors.Is(err, allocations.ErrUnpriced) && !errors.Is(err, allocations.ErrUnavailable) {
+			if _, err := allocations.Check(ctx, q, scheme, userID, key, groupID, account.ID, model, now, s.location()); err != nil {
+				if !errors.Is(err, allocations.ErrQuota) && !errors.Is(err, allocations.ErrKeyWindow) && !errors.Is(err, allocations.ErrPending) && !errors.Is(err, allocations.ErrRisk) && !errors.Is(err, allocations.ErrUnpriced) && !errors.Is(err, allocations.ErrUnavailable) {
 					return "", digest, err
 				}
 				allocationErr = err

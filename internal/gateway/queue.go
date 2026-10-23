@@ -65,7 +65,7 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 		} else if err := s.recheckWaitingMember(admissionCtx, entry); err != nil {
 			return id, digest, err
 		}
-		id, digest, err = s.selectAllocationAccount(admissionCtx, entry.record.UserID, entry.record.GroupID, session, provider, model, kind, entry.schemeID, affinity)
+		id, digest, err = s.selectAllocationAccount(admissionCtx, entry.record.UserID, entry.record.GroupID, session, provider, model, kind, entry.schemeID, entry.record.KeyID, affinity)
 		entry.record.AccountID = id
 		if err != ErrAccountBusy {
 			break
@@ -109,7 +109,7 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 			return id, digest, beginErr
 		}
 		defer tx.Rollback()
-		if err := allocations.Begin(admissionCtx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: entry.record.UserID, GroupID: entry.record.GroupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix(), s.location()); err != nil {
+		if err := allocations.Begin(admissionCtx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: entry.record.UserID, KeyID: entry.record.KeyID, GroupID: entry.record.GroupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix(), s.location()); err != nil {
 			return id, digest, err
 		}
 		if err := tx.Commit(); err != nil {

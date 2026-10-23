@@ -261,6 +261,33 @@ export const zh: Record<keyof typeof en, string> = {
   allocationAmount: '按金额',
   allocationTokens: '按 Token',
   allocationWindows: '按时间窗口',
+  allocationKeyShares: '按 key 份额',
+  allocationKeysExclusiveHint:
+    '请使用专用资源组，并先将其中的账号移出其他所有资源组。此资源组里的 key 会继续可用，只有下方选中的 key 受到限制。',
+  allocationKeyWindowHint:
+    '每个窗口都从每次请求时往回看最近的若干小时或天，用量随时间推移自动移出窗口，没有固定的重置时间。',
+  allocationModeKeysSummary: '为选中的 key 分配各窗口预算的百分比',
+  allocationKeyWindowConditionsHint:
+    '最多添加 8 个窗口，每个窗口都要填写作为 100% 的 USD 预算。',
+  allocationConditionBudget: '条件 {{index}} 的预算',
+  allocationKeysSection: 'Key',
+  allocationKeysHint:
+    '只限制选中的 key，此资源组里的其他 key（包括之后新建的）不受限制。各 key 份额相互独立，合计不必等于 100%；0% 表示该窗口内禁止使用。',
+  allocationKeysEmpty: '此资源组没有可选择的有效 key。',
+  allocationKeysFailed: '无法读取此资源组的 key。',
+  allocationIncludeKey: '限制 {{name}}',
+  allocationKeyShareFor: '{{name}} 的 {{duration}} 份额',
+  allocationKeyOwner: '所有者：{{owner}}',
+  allocationKeysImmediate:
+    '修改从下一个请求起立即生效，不会清零窗口内已计入的用量。暂停方案会解除限额，但用量会继续记录。',
+  allocationKeySchedule: '{{windows}} 个滚动窗口 · {{keys}} 个 key',
+  allocationKeysNotLimiting:
+    '已暂停：这些 key 当前不受限制。用量会继续记录，重新启用后立即计入。',
+  allocationNotLimitingShort: '未限制',
+  allocationKeyShareValue: '份额 {{share}}%',
+  allocationRecoversAt: '预计 {{date}} 恢复可用',
+  allocationTrailingWindow: '滚动窗口，没有固定重置时间',
+  allocationKeyNoBalances: '尚未选择任何 key。',
   allocationWindowConditions: '时间窗口条件',
   allocationWindowConditionsHint:
     '最多添加 8 个窗口。每项分别设置时长和统一 USD 上限；留空表示不限量。',
@@ -288,6 +315,7 @@ export const zh: Record<keyof typeof en, string> = {
   allocationsEmpty: '创建专用资源组并授权成员后，即可添加用量分配。',
   allocationTotalBudget: '总预算',
   allocationSelectAllMembers: '选择全部成员',
+  allocationSelectAllKeys: '选择全部 key',
   allocationIncludeMember: '包含 {{name}}',
   allocationOverrideMember: '为 {{name}} 单独设置',
   allocationOverrideLimits: '单独设置上限',
@@ -369,6 +397,7 @@ export const zh: Record<keyof typeof en, string> = {
   allocationOlderPending:
     '旧待处理记录：{{older}} 条；不占用本周期的放行余量。',
   allocationExhausted: '额度已耗尽',
+  reasonKeyWindowExhausted: 'key 在某个用量窗口内的份额已用完',
   allocationUnavailable: '此用量分配已暂停、尚未生效或你已无权使用。',
   allocationUnpriced:
     '此资源组没有可用的模型价格。请刷新账号模型，或将资源组限制为有价格的模型后重试。',
@@ -399,6 +428,8 @@ export const zh: Record<keyof typeof en, string> = {
   auditAllocationSave: '保存用量分配',
   auditAllocationSettle: '结算用量分配记录',
   auditAllocationReconcile: '确认外部额度消耗',
+  auditAllocationKeyJoin: '将 key 加入用量分配',
+  auditAllocationKeyLeave: '将 key 移出用量分配',
   auditAllocationDelete: '删除用量分配',
 
   periodDaily: '每日 · {{zone}}',

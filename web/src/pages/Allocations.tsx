@@ -10,6 +10,7 @@ import {
   setSchemeEnabled,
   modeLabels,
   allocationErrorKey,
+  allocationKeysOptions,
   type Scheme,
 } from '@/lib/allocations'
 import { DeleteScheme } from '@/components/DeleteScheme'
@@ -37,6 +38,7 @@ export function Allocations() {
       client.invalidateQueries({ queryKey: ['own-allocations'] }),
       client.invalidateQueries({ queryKey: ['available-groups'] }),
       client.invalidateQueries({ queryKey: ['keys'] }),
+      client.invalidateQueries({ queryKey: ['allocation-keys'] }),
     ])
     setEditing(undefined)
   }
@@ -52,6 +54,10 @@ export function Allocations() {
   )
   const roster = useQuery({
     ...poolMembersOptions(formPoolID),
+    enabled: editing !== undefined && formPoolID > 0,
+  })
+  const candidates = useQuery({
+    ...allocationKeysOptions(formPoolID),
     enabled: editing !== undefined && formPoolID > 0,
   })
   const loading = query.isPending || pools.isPending
@@ -126,11 +132,33 @@ export function Allocations() {
             groupID={formPoolID}
             onGroupChange={setFormPoolID}
             members={roster.data?.members ?? []}
+            keys={candidates.data?.keys ?? []}
             scheme={editingScheme}
             onSubmit={(input) => mutation.mutate({ ...input, id: editing?.id })}
             onCancel={() => setEditing(undefined)}
-            pending={mutation.isPending || roster.isPending || roster.isError}
+            pending={
+              mutation.isPending ||
+              roster.isPending ||
+              roster.isError ||
+              candidates.isPending ||
+              candidates.isError
+            }
           />
+          {candidates.isError && (
+            <div
+              role="alert"
+              className="flex items-center gap-3 text-sm text-error"
+            >
+              {t('allocationKeysFailed')}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => candidates.refetch()}
+              >
+                {t('reconnect')}
+              </Button>
+            </div>
+          )}
           {roster.isError && (
             <div
               role="alert"
@@ -206,21 +234,26 @@ export function Allocations() {
                 </div>
                 <p className="break-words text-sm text-muted-foreground">
                   {s.group_name} ·{' '}
-                  {s.config.period === 'durations'
-                    ? t('allocationWindowSchedule', {
+                  {s.config.mode === 'keys'
+                    ? t('allocationKeySchedule', {
                         windows: s.config.windows?.length ?? 0,
-                        zone: timeZone,
+                        keys: s.config.keys?.length ?? 0,
                       })
-                    : s.config.period === 'day'
-                      ? t('allocationDailySchedule', {
-                          time: s.config.reset_time ?? '00:00',
+                    : s.config.period === 'durations'
+                      ? t('allocationWindowSchedule', {
+                          windows: s.config.windows?.length ?? 0,
                           zone: timeZone,
                         })
-                      : t('allocationMonthlySchedule', {
-                          day: s.config.reset_day ?? 1,
-                          time: s.config.reset_time ?? '00:00',
-                          zone: timeZone,
-                        })}
+                      : s.config.period === 'day'
+                        ? t('allocationDailySchedule', {
+                            time: s.config.reset_time ?? '00:00',
+                            zone: timeZone,
+                          })
+                        : t('allocationMonthlySchedule', {
+                            day: s.config.reset_day ?? 1,
+                            time: s.config.reset_time ?? '00:00',
+                            zone: timeZone,
+                          })}
                 </p>
                 {s.next && (
                   <p className="text-sm text-muted-foreground">
