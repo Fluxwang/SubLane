@@ -54,6 +54,8 @@ type MemberWindowLimit struct {
 type WindowCondition struct {
 	DurationSeconds int64 `json:"duration_seconds"`
 	Limit           int64 `json:"limit"`
+	// AddedAt is server-assigned in key-share mode; usage before it never counts toward the window.
+	AddedAt int64 `json:"added_at,omitempty"`
 }
 
 // Rates are micro-USD per million tokens.
@@ -72,6 +74,7 @@ type Config struct {
 	Rates     []Rate            `json:"rates"`
 	RatioUnit string            `json:"ratio_unit,omitempty"`
 	Windows   []WindowCondition `json:"windows,omitempty"`
+	Keys      []KeyShare        `json:"keys,omitempty"`
 	// Total is in tokens or micro-USD according to RatioUnit.
 	Total int64 `json:"total,omitempty"`
 }
@@ -164,11 +167,17 @@ func validMemberLimit(c Config, m Share) bool {
 	}
 }
 func normalize(c *Config) error {
+	if keyMode(*c) {
+		if err := normalizeKeys(c); err != nil {
+			return err
+		}
+		return normalizeRates(c)
+	}
 	// Match the gateway's pool catalog limit: automatic pricing may include every supported model.
 	if (c.Mode != "tokens" && c.Mode != "amount" && c.Mode != "ratio" && c.Mode != "windows") || len(c.Members) == 0 || len(c.Members) > 100 || len(c.Rates) > 4096 {
 		return ErrInput
 	}
-	if (c.Period != "day" && c.Period != "month" && c.Period != "durations") || !validResetSchedule(*c) || (c.Period == "durations") != (c.Mode == "windows") {
+	if (c.Period != "day" && c.Period != "month" && c.Period != "durations") || !validResetSchedule(*c) || (c.Period == "durations") != durationMode(*c) {
 		return ErrInput
 	}
 	if c.Mode == "ratio" {
@@ -211,10 +220,25 @@ func normalize(c *Config) error {
 		seen[m.UserID] = true
 		total += m.Limit
 	}
-	if c.Mode == "ratio" && total > 10000 {
+	if c.Mode == "ratio" && total > 10000 || len(c.Keys) > 0 {
 		return ErrInput
 	}
-	if (c.Mode == "amount" || c.Mode == "windows" || c.Mode == "ratio" && c.RatioUnit == "amount") && len(c.Rates) == 0 {
+	if err := normalizeRates(c); err != nil {
+		return err
+	}
+	slices.SortFunc(c.Members, func(a, b Share) int {
+		if a.UserID < b.UserID {
+			return -1
+		}
+		if a.UserID > b.UserID {
+			return 1
+		}
+		return 0
+	})
+	return nil
+}
+func normalizeRates(c *Config) error {
+	if pricedConfig(*c) && len(c.Rates) == 0 {
 		return ErrInput
 	}
 	models := map[string]bool{}
@@ -232,15 +256,6 @@ func normalize(c *Config) error {
 	if c.Rates == nil {
 		c.Rates = []Rate{}
 	}
-	slices.SortFunc(c.Members, func(a, b Share) int {
-		if a.UserID < b.UserID {
-			return -1
-		}
-		if a.UserID > b.UserID {
-			return 1
-		}
-		return 0
-	})
 	return nil
 }
 func Current(ctx context.Context, q *db.Queries, id, now int64) (Revision, error) {
@@ -258,7 +273,7 @@ func decodeRevision(id, at int64, raw string) (Revision, error) {
 	if err := json.Unmarshal([]byte(raw), &r.Config); err != nil {
 		return r, err
 	}
-	if (r.Config.Period != "day" && r.Config.Period != "month" && r.Config.Period != "durations") || !validResetSchedule(r.Config) || (r.Config.Period == "durations") != (r.Config.Mode == "windows") {
+	if (r.Config.Period != "day" && r.Config.Period != "month" && r.Config.Period != "durations") || !validResetSchedule(r.Config) || (r.Config.Period == "durations") != durationMode(r.Config) {
 		return r, ErrInput
 	}
 	return r, nil
@@ -406,15 +421,17 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 			return Scheme{}, ErrPoolConflict
 		}
 	}
-	var previousRates []Rate
+	var previousRates, previousWindows = []Rate(nil), []WindowCondition(nil)
 	if id != 0 {
 		previous, err := s.readSchemeCore(ctx, q, id, now)
 		if err != nil {
 			return Scheme{}, err
 		}
-		if previous.GroupID != in.GroupID {
+		// Key bindings mean different things in key-share and member modes, so a scheme never switches between them.
+		if previous.GroupID != in.GroupID || keyMode(previous.Config) != keyMode(in.Config) {
 			return Scheme{}, ErrInput
 		}
+		previousWindows = previous.Config.Windows
 		previousRates = append(previousRates, previous.Config.Rates...)
 		if previous.Next != nil {
 			// The scheduled revision is newer; its rates must win in the fallback map.
@@ -446,7 +463,7 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 		if err != nil {
 			return Scheme{}, err
 		}
-		if in.StartNext {
+		if in.StartNext && !keyMode(in.Config) {
 			effective = nextEffective(in.Config, now, s.location(), now)
 		}
 	} else {
@@ -456,7 +473,7 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 		current, err := Current(ctx, q, id, now)
 		if err == nil {
 			// Support immediate application of edits via ApplyNow flag
-			if in.ApplyNow {
+			if in.ApplyNow || keyMode(in.Config) {
 				effective = now
 			} else {
 				effective = nextEffective(current.Config, now, s.location(), current.EffectiveAt)
@@ -474,11 +491,22 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 			return Scheme{}, err
 		}
 	}
+	if keyMode(in.Config) {
+		stampKeyWindows(&in.Config, previousWindows, now)
+		if err = syncKeyBindings(ctx, q, id, in.GroupID, in.Config.Keys, now); err != nil {
+			return Scheme{}, err
+		}
+	}
 	raw, err := json.Marshal(in.Config)
 	if err != nil {
 		return Scheme{}, err
 	}
-	if _, err = q.SaveAllocationRevision(ctx, db.SaveAllocationRevisionParams{SchemeID: id, EffectiveAt: effective, Config: string(raw)}); err != nil {
+	if keyMode(in.Config) {
+		err = saveImmediateRevision(ctx, q, id, now, string(raw))
+	} else {
+		_, err = q.SaveAllocationRevision(ctx, db.SaveAllocationRevisionParams{SchemeID: id, EffectiveAt: effective, Config: string(raw)})
+	}
+	if err != nil {
 		return Scheme{}, err
 	}
 	if err = audit.Record(ctx, q, "allocation.save", "allocation", audit.ID(id)); err != nil {
@@ -518,8 +546,9 @@ func (catalog *poolModelCatalog) addAccount(provider string, snapshot []byte, re
 }
 
 func pricedConfig(config Config) bool {
-	return config.Mode == "amount" || config.Mode == "windows" || config.Mode == "ratio" && config.RatioUnit == "amount"
+	return config.Mode == "amount" || config.Mode == "windows" || keyMode(config) || config.Mode == "ratio" && config.RatioUnit == "amount"
 }
+func durationMode(config Config) bool { return config.Mode == "windows" || keyMode(config) }
 
 // Save and read paths use the same pool model set; warning state itself is never saved in a revision.
 func loadPoolModelCatalog(ctx context.Context, q *db.Queries, groupID int64) (poolModelCatalog, error) {

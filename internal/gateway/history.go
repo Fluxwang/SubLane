@@ -288,7 +288,7 @@ func classify(ctx context.Context, err error) (outcome, code, penalty string) {
 		return statusOutcome(rejected.Status)
 	}
 	switch {
-	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk), errors.Is(err, allocations.ErrUnavailable), errors.Is(err, allocations.ErrUnpriced):
+	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrKeyWindow), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk), errors.Is(err, allocations.ErrUnavailable), errors.Is(err, allocations.ErrUnpriced):
 		return "rejected", err.Error(), ""
 	case errors.Is(err, ErrMemberBusy):
 		return "rejected", "member_busy", ""

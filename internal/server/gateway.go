@@ -312,7 +312,7 @@ func gatewayFailure(err error) (int, string) {
 		return 503, "no_accounts_available"
 	case errors.Is(err, allocations.ErrQuota):
 		return 403, err.Error()
-	case errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk):
+	case errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk), errors.Is(err, allocations.ErrKeyWindow):
 		return 429, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):
 		return 403, err.Error()
@@ -409,7 +409,14 @@ func writeGatewayFailure(w http.ResponseWriter, err error, writeError func(http.
 		if errors.As(err, &memberRate) {
 			value = strconv.FormatInt(memberRate.RetryAfter, 10)
 		}
-		retryAfter(w, value)
+		var keyWindow *allocations.KeyWindowError
+		if errors.As(err, &keyWindow) {
+			// Key windows can last up to a year; the one-hour clamp only guards upstream-supplied hints.
+			w.Header().Set("Retry-After", strconv.FormatInt(max(1, keyWindow.RetryAfter), 10))
+			w.Header().Set("X-SubLane-Allocation-Window", strconv.FormatInt(keyWindow.WindowSeconds, 10))
+		} else {
+			retryAfter(w, value)
+		}
 	}
 	writeError(w, status, code)
 }
@@ -419,6 +426,9 @@ func gatewayErrorBody(code string) map[string]string {
 }
 
 func gatewayErrorMessage(code string) string {
+	if code == "allocation_key_window_exhausted" {
+		return "allocation_key_window_exhausted: This key has used its share of a usage window. Retry after the Retry-After interval or ask your workspace administrator to raise the share."
+	}
 	if code == "content_policy_blocked" {
 		return "content_policy_blocked: Request blocked by workspace content rules. It was not sent upstream. Remove the sensitive content or contact your workspace administrator."
 	}

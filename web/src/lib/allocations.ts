@@ -4,7 +4,7 @@ import { request, ApiError } from './request'
 import { authKey, type AuthState } from './auth'
 
 const integer = z.number().int().nonnegative()
-const modeSchema = z.enum(['ratio', 'amount', 'tokens', 'windows'])
+const modeSchema = z.enum(['ratio', 'amount', 'tokens', 'windows', 'keys'])
 const unitSchema = z.enum(['amount', 'tokens'])
 const rateSchema = z.object({
   model: z.string(),
@@ -15,6 +15,13 @@ const rateSchema = z.object({
 const windowConditionSchema = z.object({
   duration_seconds: integer,
   limit: integer,
+  added_at: integer.optional(),
+})
+const keyShareSchema = z.object({
+  key_id: integer,
+  shares: z
+    .array(z.object({ duration_seconds: integer, share: integer.max(10000) }))
+    .max(8),
 })
 const configSchema = z.object({
   mode: modeSchema,
@@ -36,6 +43,7 @@ const configSchema = z.object({
   rates: z.array(rateSchema).max(4096),
   ratio_unit: unitSchema.optional(),
   windows: z.array(windowConditionSchema).max(8).optional(),
+  keys: z.array(keyShareSchema).max(100).optional(),
   total: integer.optional(),
 })
 const priceCoverageSchema = z.object({
@@ -61,7 +69,11 @@ export const schemeSchema = revisionSchema.extend({
 const balanceSchema = z.object({
   user_id: integer,
   username: z.string(),
-  window_kind: z.enum(['day', 'month', 'duration']),
+  key_id: integer.optional(),
+  key_name: z.string().optional(),
+  key_prefix: z.string().optional(),
+  share: integer.optional(),
+  window_kind: z.enum(['day', 'month', 'duration', 'trailing']),
   window_seconds: integer,
   mode: unitSchema,
   limit: integer,
@@ -135,6 +147,24 @@ export function ownAllocationOptions(client: QueryClient, user: number) {
     refetchInterval: 30_000,
   })
 }
+const keyCandidateSchema = z.object({
+  id: integer,
+  name: z.string(),
+  prefix: z.string(),
+  owner: z.string(),
+})
+export type AllocationKeyCandidate = z.infer<typeof keyCandidateSchema>
+export function allocationKeysOptions(group: number) {
+  return queryOptions({
+    queryKey: ['allocation-keys', group],
+    queryFn: ({ signal }) =>
+      request(
+        `/api/allocations/keys?group_id=${group}`,
+        z.object({ keys: z.array(keyCandidateSchema).max(500) }),
+        { signal },
+      ),
+  })
+}
 export function saveScheme({ id, ...input }: SchemeInput & { id?: number }) {
   return request(
     id ? `/api/allocations/${id}` : '/api/allocations',
@@ -161,6 +191,7 @@ export const modeLabels = {
   amount: 'allocationAmount',
   tokens: 'allocationTokens',
   windows: 'allocationWindows',
+  keys: 'allocationKeyShares',
 } as const
 export function parseAllocationValue(
   value: string,

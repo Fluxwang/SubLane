@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/murongg/SubLane/internal/allocations"
@@ -40,6 +41,7 @@ func allocationError(w http.ResponseWriter, err error) {
 }
 func (h *allocationHTTP) register(r chi.Router) {
 	r.Get("/", h.list)
+	r.Get("/keys", h.keyCandidates)
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) { h.save(w, r, 0) })
 	r.Get("/{id}", h.detail)
 	r.Patch("/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -179,4 +181,20 @@ func (h *allocationHTTP) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+func (h *allocationHTTP) keyCandidates(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w, r) {
+		return
+	}
+	group, err := strconv.ParseInt(r.URL.Query().Get("group_id"), 10, 64)
+	if err != nil || group <= 0 {
+		allocationError(w, allocations.ErrInput)
+		return
+	}
+	keys, err := h.gateway.Allocations().KeyCandidates(r.Context(), group)
+	if err != nil {
+		allocationError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"keys": keys})
 }

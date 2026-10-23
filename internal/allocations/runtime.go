@@ -61,15 +61,24 @@ func Authorize(ctx context.Context, q *db.Queries, scheme, user, group, now int6
 func KeyScheme(ctx context.Context, q *db.Queries, key, user, group, now int64) (int64, error) {
 	id, err := q.GetKeyAllocation(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
-		if _, err = q.GetPoolAllocation(ctx, group); err == nil {
-			return 0, ErrUnavailable
-		} else if !errors.Is(err, sql.ErrNoRows) {
+		pool, err := q.GetPoolAllocation(ctx, group)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		if err != nil {
 			return 0, err
 		}
-		return 0, nil
+		// Key-share schemes constrain only their selected keys; other pool keys stay unrestricted.
+		if _, _, keys, err := keySchemeRevision(ctx, q, pool, group, now); err != nil || keys {
+			return 0, err
+		}
+		return 0, ErrUnavailable
 	}
 	if err != nil {
 		return 0, err
+	}
+	if _, _, keys, err := keySchemeRevision(ctx, q, id, group, now); err != nil || keys {
+		return id, err
 	}
 	_, err = Authorize(ctx, q, id, user, group, now)
 	return id, err
@@ -167,7 +176,13 @@ func readMemberWindow(ctx context.Context, q *db.Queries, scheme, user int64, me
 	}, nil
 }
 
-func Check(ctx context.Context, q *db.Queries, scheme, user, group int64, account, model string, now int64, location *time.Location) (Revision, error) {
+func Check(ctx context.Context, q *db.Queries, scheme, user, key, group int64, account, model string, now int64, location *time.Location) (Revision, error) {
+	if row, rev, keys, err := keySchemeRevision(ctx, q, scheme, group, now); err != nil || keys {
+		if err != nil {
+			return rev, err
+		}
+		return rev, checkKey(ctx, q, row.Enabled == 1, rev, scheme, key, account, model, now)
+	}
 	rev, err := Authorize(ctx, q, scheme, user, group, now)
 	if err != nil {
 		return rev, err
@@ -200,14 +215,20 @@ func Check(ctx context.Context, q *db.Queries, scheme, user, group int64, accoun
 }
 
 type Request struct {
-	ID                        string
-	SchemeID, UserID, GroupID int64
-	AccountID, Model          string
-	StartedAt                 int64
+	ID                               string
+	SchemeID, UserID, KeyID, GroupID int64
+	AccountID, Model                 string
+	StartedAt                        int64
 }
 
 func Begin(ctx context.Context, q *db.Queries, r Request, now int64, location *time.Location) error {
-	rev, err := Check(ctx, q, r.SchemeID, r.UserID, r.GroupID, r.AccountID, r.Model, now, location)
+	if row, rev, keys, err := keySchemeRevision(ctx, q, r.SchemeID, r.GroupID, now); err != nil || keys {
+		if err != nil {
+			return err
+		}
+		return beginKey(ctx, q, r, row.Enabled == 1, rev, now)
+	}
+	rev, err := Check(ctx, q, r.SchemeID, r.UserID, r.KeyID, r.GroupID, r.AccountID, r.Model, now, location)
 	if err != nil {
 		return err
 	}

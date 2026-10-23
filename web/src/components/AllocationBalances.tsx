@@ -11,11 +11,14 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
       dateStyle: 'short',
       timeStyle: 'medium',
     })
+  const keyMode = detail.config.mode === 'keys'
+  // Key-share balances belong to keys; every other mode reports per member.
   const members = new Map<number, AllocationDetail['balances']>()
   for (const balance of detail.balances) {
-    const windows = members.get(balance.user_id) ?? []
+    const recipient = keyMode ? (balance.key_id ?? 0) : balance.user_id
+    const windows = members.get(recipient) ?? []
     windows.push(balance)
-    members.set(balance.user_id, windows)
+    members.set(recipient, windows)
   }
   return (
     <div className="space-y-4">
@@ -30,19 +33,21 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
       )}
       {!detail.available && (
         <p className="text-sm text-muted-foreground">
-          {t('allocationUnavailable')}
+          {t(keyMode ? 'allocationKeysNotLimiting' : 'allocationUnavailable')}
         </p>
       )}
       {detail.balances.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">
-          {t('allocationNoBalances')}
+          {t(keyMode ? 'allocationKeyNoBalances' : 'allocationNoBalances')}
         </p>
       ) : (
         <div className="divide-y divide-border">
           {[...members].map(([userID, windows]) => {
             const b = windows[0]
             const state = !detail.available
-              ? 'allocationUnavailableShort'
+              ? keyMode
+                ? 'allocationNotLimitingShort'
+                : 'allocationUnavailableShort'
               : windows.some((window) => window.admission === 'exhausted')
                 ? 'allocationExhausted'
                 : windows.some((window) => window.admission === 'risk_limited')
@@ -52,11 +57,11 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
               <section key={userID} className="space-y-3 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="break-words text-sm font-medium">
-                    {b.username}
+                    {keyMode ? `${b.key_name} (${b.key_prefix}…)` : b.username}
                   </h3>
                   <Status
                     kind={
-                      state === 'allocationUnavailableShort'
+                      !detail.available
                         ? 'neutral'
                         : state === 'allocationRiskPaused'
                           ? 'warning'
@@ -80,7 +85,8 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
                       }
                     >
                       {(windows.length > 1 ||
-                        detail.config.mode === 'windows') && (
+                        detail.config.mode === 'windows' ||
+                        keyMode) && (
                         <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium">
                           <h4>
                             {t(
@@ -94,6 +100,13 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
                                     : window.window_seconds / 3600,
                               },
                             )}
+                            {keyMode &&
+                              ` · ${t('allocationKeyShareValue', {
+                                share: allocationValue(
+                                  window.share ?? 0,
+                                  'ratio',
+                                ),
+                              })}`}
                           </h4>
                           {(window.admission === 'exhausted' ||
                             window.admission === 'risk_limited') && (
@@ -199,22 +212,26 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
                           </p>
                         )}
                       <p className="text-xs leading-5 text-muted-foreground">
-                        {detail.config.period === 'durations'
-                          ? timeZone
-                          : detail.config.period === 'day'
-                            ? t('allocationDailySchedule', {
-                                time: detail.config.reset_time ?? '00:00',
-                                zone: timeZone,
+                        {keyMode
+                          ? window.reset_at > 0
+                            ? t('allocationRecoversAt', {
+                                date: date(window.reset_at),
                               })
-                            : t('allocationMonthlySchedule', {
-                                day: detail.config.reset_day ?? 1,
-                                time: detail.config.reset_time ?? '00:00',
-                                zone: timeZone,
-                              })}{' '}
-                        ·{' '}
-                        {t('allocationResetAt', {
-                          date: date(window.reset_at),
-                        })}
+                            : t('allocationTrailingWindow')
+                          : detail.config.period === 'durations'
+                            ? timeZone
+                            : detail.config.period === 'day'
+                              ? t('allocationDailySchedule', {
+                                  time: detail.config.reset_time ?? '00:00',
+                                  zone: timeZone,
+                                })
+                              : t('allocationMonthlySchedule', {
+                                  day: detail.config.reset_day ?? 1,
+                                  time: detail.config.reset_time ?? '00:00',
+                                  zone: timeZone,
+                                })}
+                        {!keyMode &&
+                          ` · ${t('allocationResetAt', { date: date(window.reset_at) })}`}
                         {window.mode === 'amount' &&
                           ` · ${t('allocationActualTokens', { tokens: allocationValue(window.tokens, 'tokens') })}`}
                       </p>

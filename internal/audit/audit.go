@@ -67,6 +67,7 @@ func NewForTenant(connection *sql.DB, tenantID int64) *Service {
 
 var actions = map[string]string{
 	"allocation.save": "allocation", "allocation.settle": "allocation", "allocation.reconcile": "allocation", "allocation.delete": "allocation",
+	"allocation.key_join": "key", "allocation.key_leave": "key",
 	"backup.export": "backup", "backup.prepare": "backup", "backup.verify": "backup",
 	"settings.update": "settings",
 	"settings.test":   "settings",

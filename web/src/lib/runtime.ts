@@ -56,6 +56,7 @@ export const reasonKeys: Record<string, keyof typeof en> = {
   content_policy_blocked: 'reasonContentBlocked',
   content_check_unavailable: 'reasonContentUnavailable',
   allocation_exhausted: 'allocationExhausted',
+  allocation_key_window_exhausted: 'reasonKeyWindowExhausted',
   allocation_pending: 'allocationPending',
   allocation_risk_limit: 'allocationRiskLimit',
   allocation_unavailable: 'allocationUnavailable',

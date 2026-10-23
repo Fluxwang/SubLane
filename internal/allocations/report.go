@@ -8,8 +8,13 @@ import (
 )
 
 type Balance struct {
-	UserID         int64  `json:"user_id"`
-	Username       string `json:"username"`
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	// Key fields identify the recipient in key-share mode; Share is in hundredths of a percent.
+	KeyID          int64  `json:"key_id,omitempty"`
+	KeyName        string `json:"key_name,omitempty"`
+	KeyPrefix      string `json:"key_prefix,omitempty"`
+	Share          int64  `json:"share,omitempty"`
 	WindowKind     string `json:"window_kind"`
 	WindowSeconds  int64  `json:"window_seconds"`
 	Mode           string `json:"mode"`
@@ -56,6 +61,16 @@ func (s *Service) Detail(ctx context.Context, id, user int64) (Detail, error) {
 		return Detail{}, err
 	}
 	out := Detail{Scheme: scheme, Balances: []Balance{}, Pending: []Pending{}, Available: scheme.Enabled && scheme.EffectiveAt <= now}
+	if keyMode(scheme.Config) {
+		// Key holders have no personal view; only workspace administrators read key-share balances.
+		if user > 0 {
+			return out, ErrUnavailable
+		}
+		if out.Balances, err = keyBalances(ctx, q, scheme, now); err != nil {
+			return out, err
+		}
+		return out, tx.Commit()
+	}
 	if user > 0 {
 		allowed, err := q.CanUseAllocation(ctx, db.CanUseAllocationParams{ID: id, UserID: user})
 		if err != nil {
@@ -158,6 +173,39 @@ func (s *Service) Own(ctx context.Context, user int64) ([]Detail, error) {
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, nil
+}
+
+func keyBalances(ctx context.Context, q *db.Queries, scheme Scheme, now int64) ([]Balance, error) {
+	bindings, err := q.ListSchemeKeyBindings(ctx, scheme.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := []Balance{}
+	for _, binding := range bindings {
+		windows, err := readKeyWindows(ctx, q, scheme.ID, scheme.Revision, binding.KeyID, binding.JoinedAt, now)
+		if errors.Is(err, ErrUnavailable) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, window := range windows {
+			admission := "active"
+			resetAt := int64(0)
+			if window.exhausted() {
+				admission, resetAt = "exhausted", window.recovery
+			} else if window.risk.limited {
+				admission = "risk_limited"
+			}
+			out = append(out, Balance{
+				KeyID: binding.KeyID, KeyName: binding.Name, KeyPrefix: binding.Prefix, Share: window.share,
+				WindowKind: "trailing", WindowSeconds: window.seconds, Mode: "amount",
+				Limit: window.limit, Used: window.used, Tokens: window.tokens, PendingCurrent: window.pending, InFlight: window.active,
+				Reserved: window.risk.reserved, AdmissionRoom: window.risk.room, Admission: admission, ResetAt: resetAt,
+			})
+		}
 	}
 	return out, nil
 }

@@ -167,7 +167,8 @@ func (h *keyHTTP) groupChoices(w http.ResponseWriter, r *http.Request) {
 		for _, g := range values {
 			managed := false
 			for _, s := range all {
-				if s.GroupID == g.ID {
+				// Key-share schemes select existing keys; new keys in their pool are ordinary, unrestricted keys.
+				if s.GroupID == g.ID && s.Config.Mode != "keys" {
 					managed = true
 					if available, ok := eligible[s.ID]; ok {
 						g.SchemeID = s.ID

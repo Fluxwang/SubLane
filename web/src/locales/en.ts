@@ -284,6 +284,34 @@ export const en = {
   allocationAmount: 'By amount',
   allocationTokens: 'By tokens',
   allocationWindows: 'By time window',
+  allocationKeyShares: 'By key share',
+  allocationKeysExclusiveHint:
+    'Use a dedicated group and remove its accounts from every other group first. Keys in this group keep working; only the keys selected below are limited.',
+  allocationKeyWindowHint:
+    'Each window looks back over the last hours or days from every request, so usage stops counting as it ages out. There is no fixed reset time.',
+  allocationModeKeysSummary:
+    'Give selected keys a percentage of each window budget',
+  allocationKeyWindowConditionsHint:
+    'Add up to 8 windows. Each needs a USD budget that counts as 100%.',
+  allocationConditionBudget: 'Budget for condition {{index}}',
+  allocationKeysSection: 'Keys',
+  allocationKeysHint:
+    'Only selected keys are limited. Other keys in this group, including new ones, stay unrestricted. Shares are independent and need not add up to 100%; 0% blocks a key in that window.',
+  allocationKeysEmpty: 'This group has no active keys to select.',
+  allocationKeysFailed: 'Could not load the keys of this group.',
+  allocationIncludeKey: 'Limit {{name}}',
+  allocationKeyShareFor: '{{duration}} share for {{name}}',
+  allocationKeyOwner: 'Owner: {{owner}}',
+  allocationKeysImmediate:
+    'Changes apply to the next request and never clear usage already counted in a window. Pausing lifts the limits while usage keeps counting.',
+  allocationKeySchedule: '{{windows}} trailing windows · {{keys}} keys',
+  allocationKeysNotLimiting:
+    'Paused: these keys are not limited. Usage keeps counting and applies again as soon as the allowance is enabled.',
+  allocationNotLimitingShort: 'Not limiting',
+  allocationKeyShareValue: 'Share {{share}}%',
+  allocationRecoversAt: 'Usable again around {{date}}',
+  allocationTrailingWindow: 'Trailing window, no fixed reset',
+  allocationKeyNoBalances: 'No keys selected yet.',
   allocationWindowConditions: 'Time-window conditions',
   allocationWindowConditionsHint:
     'Add up to 8 windows. Each has its own duration and shared USD limit; blank means unlimited.',
@@ -312,6 +340,7 @@ export const en = {
     'Create a dedicated resource group and grant members access to add a resource allowance.',
   allocationTotalBudget: 'Total budget',
   allocationSelectAllMembers: 'Select all members',
+  allocationSelectAllKeys: 'Select all keys',
   allocationIncludeMember: 'Include {{name}}',
   allocationOverrideMember: 'Override limits for {{name}}',
   allocationOverrideLimits: 'Set personal limits',
@@ -400,6 +429,7 @@ export const en = {
   allocationOlderPending:
     'Older pending requests: {{older}}. They do not count toward this cycle’s admission.',
   allocationExhausted: 'Allowance exhausted',
+  reasonKeyWindowExhausted: 'Key share of a usage window used up',
   allocationUnavailable:
     'This resource allowance is paused, scheduled, or no longer available to you.',
   allocationUnpriced:
@@ -432,6 +462,8 @@ export const en = {
   auditAllocationSave: 'Saved resource allowance',
   auditAllocationSettle: 'Settled resource allowance usage',
   auditAllocationReconcile: 'Confirmed external quota usage',
+  auditAllocationKeyJoin: 'Added key to resource allowance',
+  auditAllocationKeyLeave: 'Removed key from resource allowance',
   auditAllocationDelete: 'Deleted resource allowance',
 
   periodDaily: 'Daily · {{zone}}',
